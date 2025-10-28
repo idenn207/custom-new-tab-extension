@@ -439,7 +439,18 @@ class BookmarkManager {
     // 고정 버튼
     const pinBtn = document.createElement('button');
     pinBtn.className = bookmark.pinned ? 'bookmark-pin pinned' : 'bookmark-pin';
-    pinBtn.innerHTML = '📌';
+
+    // 고정된 경우: 채워진 핀, 해제된 경우: 빈 핀
+    if (bookmark.pinned) {
+      pinBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2">
+        <path d="M9 9V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v4m-6 0h6m-6 0L7 19l5 2 5-2-2-10"/>
+      </svg>`;
+    } else {
+      pinBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 9V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v4m-6 0h6m-6 0L7 19l5 2 5-2-2-10"/>
+      </svg>`;
+    }
+
     pinBtn.title = bookmark.pinned ? '고정 해제' : '고정';
     pinBtn.onclick = (e) => {
       e.preventDefault();
@@ -859,7 +870,7 @@ class ImageManager {
 
 /**
  * 설정 관리 클래스
- * 책임: 설정 UI 및 설정 저장/로드
+ * 책임: 설정 UI 및 설정 저장/로드 (메뉴바, blur, overlay opacity)
  */
 class SettingsManager {
   /**
@@ -872,6 +883,10 @@ class SettingsManager {
     this.toggleBtn = toggleBtn;
     this.backgroundManager = backgroundManager;
     this.randomToggle = null;
+    this.blurToggle = null;
+    this.opacitySlider = null;
+    this.overlayElement = null;
+    this.currentSection = 'image';
   }
 
   /**
@@ -879,8 +894,11 @@ class SettingsManager {
    */
   initialize() {
     this.randomToggle = document.getElementById('randomImageToggle');
+    this.blurToggle = document.getElementById('blurToggle');
+    this.opacitySlider = document.getElementById('opacitySlider');
+    this.overlayElement = document.querySelector('.overlay');
 
-    if (!this.randomToggle) {
+    if (!this.randomToggle || !this.blurToggle || !this.opacitySlider || !this.overlayElement) {
       console.error('Settings elements not found');
       return;
     }
@@ -909,10 +927,75 @@ class SettingsManager {
       }
     });
 
+    // 메뉴 아이템 클릭
+    const menuItems = document.querySelectorAll('.settings-menu-item');
+    menuItems.forEach((item) => {
+      item.addEventListener('click', (e) => {
+        const target = e.currentTarget;
+        if (target instanceof HTMLElement) {
+          const section = target.dataset.section;
+          if (section) {
+            this.switchSection(section);
+          }
+        }
+      });
+    });
+
     // 랜덤 이미지 토글
     if (this.randomToggle instanceof HTMLInputElement) {
       this.randomToggle.addEventListener('change', () => this.handleRandomToggle());
     }
+
+    // 블러 토글
+    if (this.blurToggle instanceof HTMLInputElement) {
+      this.blurToggle.addEventListener('change', () => this.handleBlurToggle());
+    }
+
+    // 투명도 슬라이더
+    if (this.opacitySlider instanceof HTMLInputElement) {
+      this.opacitySlider.addEventListener('input', () => this.handleOpacityChange());
+
+      // 슬라이더 값 표시 업데이트
+      this.opacitySlider.addEventListener('input', (e) => {
+        const target = e.target;
+        if (target instanceof HTMLInputElement) {
+          const valueDisplay = document.getElementById('opacityValue');
+          if (valueDisplay) {
+            valueDisplay.textContent = target.value;
+          }
+        }
+      });
+    }
+  }
+
+  /**
+   * 설정 섹션 전환
+   * @param {string} section - 섹션 이름
+   */
+  switchSection(section) {
+    this.currentSection = section;
+
+    // 메뉴 아이템 활성화
+    const menuItems = document.querySelectorAll('.settings-menu-item');
+    menuItems.forEach((item) => {
+      if (item instanceof HTMLElement) {
+        if (item.dataset.section === section) {
+          item.classList.add('active');
+        } else {
+          item.classList.remove('active');
+        }
+      }
+    });
+
+    // 섹션 표시
+    const sections = document.querySelectorAll('.settings-section');
+    sections.forEach((sec) => {
+      if (sec.id === `settings${section.charAt(0).toUpperCase() + section.slice(1)}`) {
+        sec.classList.add('active');
+      } else {
+        sec.classList.remove('active');
+      }
+    });
   }
 
   /**
@@ -932,9 +1015,36 @@ class SettingsManager {
   /**
    * 설정 로드
    */
-  loadSettings() {
+  async loadSettings() {
+    // 랜덤 모드
     if (this.randomToggle instanceof HTMLInputElement) {
       this.randomToggle.checked = this.backgroundManager.isRandomMode;
+    }
+
+    // 블러 설정
+    try {
+      const result = await chrome.storage.local.get(['blurEnabled', 'overlayOpacity']);
+
+      const blurEnabled = result.blurEnabled !== false; // 기본값 true
+      const overlayOpacity = result.overlayOpacity !== undefined ? result.overlayOpacity : 50;
+
+      if (this.blurToggle instanceof HTMLInputElement) {
+        this.blurToggle.checked = blurEnabled;
+      }
+
+      if (this.opacitySlider instanceof HTMLInputElement) {
+        this.opacitySlider.value = String(overlayOpacity);
+        const valueDisplay = document.getElementById('opacityValue');
+        if (valueDisplay) {
+          valueDisplay.textContent = String(overlayOpacity);
+        }
+      }
+
+      // 설정 적용
+      this.applyBlurSetting(blurEnabled);
+      this.applyOpacitySetting(overlayOpacity);
+    } catch (error) {
+      console.error('Failed to load overlay settings:', error);
     }
   }
 
@@ -951,6 +1061,84 @@ class SettingsManager {
       } else {
         alert('랜덤 모드로 변경되었습니다. 새 탭을 열 때마다 다른 이미지가 표시됩니다.');
       }
+    }
+  }
+
+  /**
+   * 블러 토글 처리
+   */
+  async handleBlurToggle() {
+    if (this.blurToggle instanceof HTMLInputElement) {
+      const blurEnabled = this.blurToggle.checked;
+      await this.saveBlurSetting(blurEnabled);
+      this.applyBlurSetting(blurEnabled);
+    }
+  }
+
+  /**
+   * 투명도 변경 처리
+   */
+  async handleOpacityChange() {
+    if (this.opacitySlider instanceof HTMLInputElement) {
+      const opacity = parseInt(this.opacitySlider.value);
+      await this.saveOpacitySetting(opacity);
+      this.applyOpacitySetting(opacity);
+    }
+  }
+
+  /**
+   * 블러 설정 적용
+   * @param {boolean} enabled
+   */
+  applyBlurSetting(enabled) {
+    if (this.overlayElement) {
+      if (enabled) {
+        this.overlayElement.style.backdropFilter = 'blur(3px)';
+      } else {
+        this.overlayElement.style.backdropFilter = 'none';
+      }
+    }
+  }
+
+  /**
+   * 투명도 설정 적용
+   * @param {number} opacity - 0-100
+   */
+  applyOpacitySetting(opacity) {
+    if (this.overlayElement) {
+      // 0-100을 0.0-0.6으로 매핑 (최대 60% 불투명도)
+      const alpha1 = (opacity / 100) * 0.4;
+      const alpha2 = (opacity / 100) * 0.6;
+
+      this.overlayElement.style.background = `linear-gradient(
+        135deg,
+        rgba(0, 0, 0, ${alpha1}) 0%,
+        rgba(0, 0, 0, ${alpha2}) 100%
+      )`;
+    }
+  }
+
+  /**
+   * 블러 설정 저장
+   * @param {boolean} enabled
+   */
+  async saveBlurSetting(enabled) {
+    try {
+      await chrome.storage.local.set({ blurEnabled: enabled });
+    } catch (error) {
+      console.error('Failed to save blur setting:', error);
+    }
+  }
+
+  /**
+   * 투명도 설정 저장
+   * @param {number} opacity
+   */
+  async saveOpacitySetting(opacity) {
+    try {
+      await chrome.storage.local.set({ overlayOpacity: opacity });
+    } catch (error) {
+      console.error('Failed to save opacity setting:', error);
     }
   }
 }

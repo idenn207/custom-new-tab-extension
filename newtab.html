@@ -95,31 +95,82 @@
   <button class="settings-toggle" id="settingsToggle" title="설정">
     <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <circle cx="12" cy="12" r="3"></circle>
-      <path d="M12 1v6m0 6v6m9-9h-6m-6 0H3"></path>
-      <path d="M20.49 8.51l-4.24 4.24m-8.49 0L3.51 8.51m0 7.98l4.24-4.24m8.49 0l4.24 4.24"></path>
+      <path d="M12 1v6m0 6v6"></path>
+      <path d="M4.22 4.22l4.24 4.24m5.08 5.08l4.24 4.24"></path>
+      <path d="M1 12h6m6 0h6"></path>
+      <path d="M4.22 19.78l4.24-4.24m5.08-5.08l4.24-4.24"></path>
     </svg>
   </button>
 
   <!-- 설정 모달 -->
   <div class="modal" id="settingsModal">
-    <div class="modal-content">
-      <h3>설정</h3>
-      <div class="settings-section">
-        <div class="setting-item">
-          <label class="setting-label">
-            <span>배경 이미지 모드</span>
-            <div class="toggle-container">
-              <input type="checkbox" id="randomImageToggle" class="toggle-input">
-              <label for="randomImageToggle" class="toggle-label">
-                <span class="toggle-text" data-on="랜덤" data-off="고정"></span>
-              </label>
-            </div>
-          </label>
-          <p class="setting-description">고정 모드: 한 번 선택된 이미지가 계속 표시됩니다</p>
-        </div>
+    <div class="modal-content modal-settings">
+      <div class="settings-sidebar">
+        <h3>설정</h3>
+        <nav class="settings-menu">
+          <button class="settings-menu-item active" data-section="image">이미지</button>
+          <button class="settings-menu-item" data-section="background">배경</button>
+          <button class="settings-menu-item" data-section="overlay">오버레이</button>
+        </nav>
       </div>
-      <div class="modal-buttons">
-        <button type="button" class="btn-secondary" id="closeSettingsBtn">닫기</button>
+
+      <div class="settings-content">
+        <!-- 이미지 설정 -->
+        <div class="settings-section active" id="settingsImage">
+          <div class="settings-group">
+            <label class="settings-label">배경 이미지 모드</label>
+            <div class="settings-control">
+              <div class="toggle-container">
+                <input type="checkbox" id="randomImageToggle" class="toggle-input">
+                <label for="randomImageToggle" class="toggle-label">
+                  <span class="toggle-text" data-on="랜덤" data-off="고정"></span>
+                </label>
+              </div>
+              <p class="setting-description">고정 모드: 한 번 선택된 이미지가 계속 표시됩니다</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 배경 설정 -->
+        <div class="settings-section" id="settingsBackground">
+          <div class="settings-group">
+            <label class="settings-label">배경 효과</label>
+            <div class="settings-control">
+              <p class="setting-description">배경 이미지 관련 설정</p>
+            </div>
+          </div>
+        </div>
+
+        <!-- 오버레이 설정 -->
+        <div class="settings-section" id="settingsOverlay">
+          <div class="settings-group">
+            <label class="settings-label">블러 효과</label>
+            <div class="settings-control">
+              <div class="toggle-container">
+                <input type="checkbox" id="blurToggle" class="toggle-input">
+                <label for="blurToggle" class="toggle-label">
+                  <span class="toggle-text" data-on="ON" data-off="OFF"></span>
+                </label>
+              </div>
+              <p class="setting-description">오버레이 블러 효과를 켜거나 끕니다</p>
+            </div>
+          </div>
+
+          <div class="settings-group">
+            <label class="settings-label">오버레이 투명도</label>
+            <div class="settings-control">
+              <div class="slider-container">
+                <input type="range" id="opacitySlider" class="slider" min="0" max="100" value="50">
+                <div class="slider-value"><span id="opacityValue">50</span>%</div>
+              </div>
+              <p class="setting-description">오버레이 어두운 정도를 조절합니다 (0: 투명, 100: 불투명)</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-buttons">
+          <button type="button" class="btn-secondary" id="closeSettingsBtn">닫기</button>
+        </div>
       </div>
     </div>
   </div>
