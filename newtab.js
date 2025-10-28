@@ -648,7 +648,7 @@ class ImageManager {
     this.uploadArea = null;
     this.imageUpload = null;
     this.imagesGrid = null;
-    this.maxFileSize = 5 * 1024 * 1024; // 5MB
+    this.maxFileSize = 15 * 1024 * 1024; // 15MB
     this.maxImages = 50;
   }
 
@@ -757,7 +757,7 @@ class ImageManager {
 
     for (const file of imageFiles) {
       if (file.size > this.maxFileSize) {
-        alert(`${file.name}은(는) 너무 큽니다. 5MB 이하의 이미지만 업로드 가능합니다.`);
+        alert(`${file.name}은(는) 너무 큽니다. 15MB 이하의 이미지만 업로드 가능합니다.`);
         continue;
       }
 

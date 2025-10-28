@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Custom New Tab",
-  "version": "2.0.2",
+  "version": "2.0.3",
   "description": "배경 이미지가 적용되는 커스텀 New Tab 페이지",
   "chrome_url_overrides": {
     "newtab": "newtab.html"
