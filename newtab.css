@@ -119,6 +119,13 @@ body {
   flex-direction: column;
   gap: 8px;
   z-index: 99;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+
+.pinned-bookmarks.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .pinned-bookmark-item {
@@ -235,6 +242,17 @@ body {
   transition: all var(--transition-speed);
   border: 1px solid transparent;
   position: relative;
+  cursor: grab;
+}
+
+.bookmark-item.dragging {
+  opacity: 0.5;
+  cursor: grabbing;
+}
+
+.bookmark-item.drag-over {
+  border-color: var(--accent-color);
+  background: var(--hover-bg);
 }
 
 .bookmark-item:hover {
@@ -493,24 +511,119 @@ body {
 
 /* ===== 메인 컨텐츠 (중앙) ===== */
 .main-content {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 40px;
+  position: fixed;
+  top: 0;
+  left: 0;
   width: 100%;
-  max-width: 700px;
-  padding: 0 40px;
-  margin-top: -60px;
+  height: 100%;
+  pointer-events: none;
+  z-index: 50;
+}
+
+.main-content > * {
+  pointer-events: auto;
 }
 
 /* ===== 시계 ===== */
+/* 수정 후 */
 .clock {
+  position: absolute;
   text-align: center;
   text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
+  transition: top 0.3s ease, bottom 0.3s ease, left 0.3s ease, right 0.3s ease, transform 0.3s ease;
+}
+
+/* 시계 위치 클래스 */
+.clock.position-top-left {
+  top: 120px;
+  left: 280px;
+  transform: translate(0, 0);
+}
+.clock.position-top-center {
+  top: 120px;
+  left: 50%;
+  transform: translate(-50%, 0);
+}
+.clock.position-top-right {
+  top: 120px;
+  left: calc(100% - 40px);
+  transform: translate(-100%, 0);
+}
+.clock.position-center-left {
+  top: 50%;
+  left: 280px;
+  transform: translate(0, -50%);
+}
+.clock.position-center-center {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+.clock.position-center-right {
+  top: 50%;
+  left: calc(100% - 40px);
+  transform: translate(-100%, -50%);
+}
+.clock.position-bottom-left {
+  top: calc(100% - 120px);
+  left: 280px;
+  transform: translate(0, -100%);
+}
+.clock.position-bottom-center {
+  top: calc(100% - 120px);
+  left: 50%;
+  transform: translate(-50%, -100%);
+}
+.clock.position-bottom-right {
+  top: calc(100% - 120px);
+  left: calc(100% - 40px);
+  transform: translate(-100%, -100%);
+}
+
+/* 겹침 시 시계 오프셋 - 위로 이동 */
+.clock.overlap-offset.position-top-left {
+  top: 200px;
+  transform: translate(0, -50%);
+}
+
+.clock.overlap-offset.position-top-center {
+  top: 200px;
+  transform: translate(-50%, -50%);
+}
+
+.clock.overlap-offset.position-top-right {
+  top: 200px;
+  transform: translate(-100%, -50%);
+}
+
+.clock.overlap-offset.position-center-left {
+  top: calc(50% - 80px);
+  transform: translate(0, -50%);
+}
+
+.clock.overlap-offset.position-center-center {
+  top: calc(50% - 80px);
+  transform: translate(-50%, -50%);
+}
+
+.clock.overlap-offset.position-center-right {
+  top: calc(50% - 80px);
+  transform: translate(-100%, -50%);
+}
+
+.clock.overlap-offset.position-bottom-left {
+  top: calc(100% - 280px);
+  transform: translate(0, -50%);
+}
+
+.clock.overlap-offset.position-bottom-center {
+  top: calc(100% - 280px);
+  transform: translate(-50%, -50%);
+}
+
+.clock.overlap-offset.position-bottom-right {
+  top: calc(100% - 280px);
+  transform: translate(-100%, -50%);
 }
 
 .time {
@@ -520,11 +633,115 @@ body {
   letter-spacing: -4px;
   color: var(--text-primary);
   line-height: 1;
+  transition: opacity 0.3s ease;
 }
 
 /* ===== 검색바 ===== */
 .search-container {
+  position: absolute;
   width: 100%;
+  max-width: 500px;
+  padding: 0 20px;
+  transition: top 0.3s ease, bottom 0.3s ease, left 0.3s ease, right 0.3s ease, transform 0.3s ease, max-width 0.3s ease;
+}
+
+/* 검색창 위치 클래스 */
+.search-container.position-top-left {
+  top: 120px;
+  left: 280px;
+  transform: translate(0, 0);
+  max-width: 400px;
+}
+.search-container.position-top-center {
+  top: 120px;
+  left: 50%;
+  transform: translate(-50%, 0);
+}
+.search-container.position-top-right {
+  top: 120px;
+  left: calc(100% - 40px);
+  transform: translate(-100%, 0);
+  max-width: 400px;
+}
+.search-container.position-center-left {
+  top: 50%;
+  left: 280px;
+  transform: translate(0, -50%);
+  max-width: 400px;
+}
+.search-container.position-center-center {
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+.search-container.position-center-right {
+  top: 50%;
+  left: calc(100% - 40px);
+  transform: translate(-100%, -50%);
+  max-width: 400px;
+}
+.search-container.position-bottom-left {
+  top: calc(100% - 120px);
+  left: 280px;
+  transform: translate(0, -100%);
+  max-width: 400px;
+}
+.search-container.position-bottom-center {
+  top: calc(100% - 120px);
+  left: 50%;
+  transform: translate(-50%, -100%);
+}
+.search-container.position-bottom-right {
+  top: calc(100% - 120px);
+  left: calc(100% - 40px);
+  transform: translate(-100%, -100%);
+  max-width: 400px;
+}
+
+/* 겹침 시 검색창 오프셋 - 아래로 이동 */
+.search-container.overlap-offset.position-top-left {
+  top: 60px;
+  transform: translate(0, -50%);
+}
+
+.search-container.overlap-offset.position-top-center {
+  top: 60px;
+  transform: translate(-50%, -50%);
+}
+
+.search-container.overlap-offset.position-top-right {
+  top: 60px;
+  transform: translate(-100%, -50%);
+}
+
+.search-container.overlap-offset.position-center-left {
+  top: calc(50% + 80px);
+  transform: translate(0, -50%);
+}
+
+.search-container.overlap-offset.position-center-center {
+  top: calc(50% + 80px);
+  transform: translate(-50%, -50%);
+}
+
+.search-container.overlap-offset.position-center-right {
+  top: calc(50% + 80px);
+  transform: translate(-100%, -50%);
+}
+
+.search-container.overlap-offset.position-bottom-left {
+  top: calc(100% - 60px);
+  transform: translate(0, -50%);
+}
+
+.search-container.overlap-offset.position-bottom-center {
+  top: calc(100% - 60px);
+  transform: translate(-50%, -50%);
+}
+
+.search-container.overlap-offset.position-bottom-right {
+  top: calc(100% - 60px);
+  transform: translate(-100%, -50%);
 }
 
 .search-form {
@@ -1074,6 +1291,61 @@ body {
   color: white;
 }
 
+/* ===== 위치 그리드 ===== */
+.position-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-top: 12px;
+  max-width: 180px;
+}
+
+.position-cell {
+  width: 100%;
+  aspect-ratio: 1;
+  background: var(--bg-primary);
+  border: 2px solid var(--border-color);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  position: relative;
+}
+
+.position-cell::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 8px;
+  height: 8px;
+  background: var(--text-secondary);
+  border-radius: 50%;
+  transition: all 0.2s ease;
+}
+
+.position-cell:hover {
+  background: var(--hover-bg);
+  border-color: var(--accent-color);
+}
+
+.position-cell:hover::before {
+  background: var(--accent-color);
+  width: 12px;
+  height: 12px;
+}
+
+.position-cell.active {
+  background: rgba(88, 128, 230, 0.15);
+  border-color: var(--accent-color);
+}
+
+.position-cell.active::before {
+  background: var(--accent-color);
+  width: 12px;
+  height: 12px;
+}
+
 /* ===== 반응형 디자인 ===== */
 @media (max-width: 1024px) {
   .time {
@@ -1121,6 +1393,32 @@ body {
 
   .time {
     font-size: 80px;
+  }
+
+  /* 모바일에서 시계 위/아래 위치 조정 */
+  .clock.position-top-left,
+  .clock.position-top-center,
+  .clock.position-top-right {
+    top: 80px;
+  }
+
+  .clock.position-bottom-left,
+  .clock.position-bottom-center,
+  .clock.position-bottom-right {
+    bottom: 80px;
+  }
+
+  /* 모바일에서 검색창 위/아래 위치 조정 */
+  .search-container.position-top-left,
+  .search-container.position-top-center,
+  .search-container.position-top-right {
+    top: 80px;
+  }
+
+  .search-container.position-bottom-left,
+  .search-container.position-bottom-center,
+  .search-container.position-bottom-right {
+    bottom: 80px;
   }
 
   .search-input {
