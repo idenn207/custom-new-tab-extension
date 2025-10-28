@@ -1,12 +1,12 @@
 {
   "manifest_version": 3,
   "name": "Custom New Tab",
-  "version": "2.0.6",
+  "version": "2.0.7",
   "description": "배경 이미지가 적용되는 커스텀 New Tab 페이지",
   "chrome_url_overrides": {
     "newtab": "newtab.html"
   },
-  "permissions": ["storage"],
+  "permissions": ["storage", "unlimitedStorage"],
   "icons": {
     "16": "images/icon-16.png",
     "48": "images/icon-48.png",

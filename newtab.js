@@ -184,9 +184,9 @@ class BackgroundManager {
    * @param {string} imageData - Base64 이미지 데이터
    */
   async addImage(imageData) {
-    // 최대 50개 제한
-    if (this.uploadedImages.length >= 50) {
-      throw new Error('최대 50개까지만 업로드할 수 있습니다.');
+    // 최대 30개 제한
+    if (this.uploadedImages.length >= this.maxImages) {
+      throw new Error(`최대 ${this.maxImages}개까지만 업로드할 수 있습니다.`);
     }
 
     this.uploadedImages.push(imageData);
@@ -745,8 +745,9 @@ class ImageManager {
     this.uploadArea = null;
     this.imageUpload = null;
     this.imagesGrid = null;
-    this.maxFileSize = 15 * 1024 * 1024; // 15MB
-    this.maxImages = 50;
+    this.maxFileSizeMB = 30; // 30MB
+    this.maxFileSize = this.maxFileSizeMB * 1024 * 1024; // 30MB
+    this.maxImages = 30;
   }
 
   /**
@@ -854,13 +855,13 @@ class ImageManager {
 
     for (const file of imageFiles) {
       if (file.size > this.maxFileSize) {
-        alert(`${file.name}은(는) 너무 큽니다. 15MB 이하의 이미지만 업로드 가능합니다.`);
+        alert(`${file.name}은(는) 너무 큽니다. ${this.maxFileSizeMB}MB 이하의 이미지만 업로드 가능합니다.`);
         continue;
       }
 
       try {
-        const imageData = await this.readFileAsDataURL(file);
-        await this.backgroundManager.addImage(imageData);
+        const compressedImageData = await this.compressImage(file);
+        await this.backgroundManager.addImage(compressedImageData);
       } catch (error) {
         console.error('Failed to upload image:', error);
         if (error instanceof Error) {
@@ -888,6 +889,87 @@ class ImageManager {
         }
       };
       reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  /**
+   * 이미지 압축
+   * @param {File} file
+   * @returns {Promise<string>}
+   */
+  compressImage(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+
+      reader.onload = (e) => {
+        const img = new Image();
+
+        img.onload = () => {
+          // 캔버스 생성
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+
+          if (!ctx) {
+            reject(new Error('Canvas context not supported'));
+            return;
+          }
+
+          // 최대 크기 설정 (1920x1080)
+          const MAX_WIDTH = 1920;
+          const MAX_HEIGHT = 1080;
+
+          let width = img.width;
+          let height = img.height;
+
+          // 비율 유지하면서 리사이징
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height = Math.round((height * MAX_WIDTH) / width);
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width = Math.round((width * MAX_HEIGHT) / height);
+              height = MAX_HEIGHT;
+            }
+          }
+
+          // 캔버스 크기 설정
+          canvas.width = width;
+          canvas.height = height;
+
+          // 이미지 그리기
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // JPEG로 변환 (품질 0.8)
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.8);
+
+          // 압축 결과 로그
+          const originalSize = file.size;
+          const compressedSize = Math.round((compressedDataUrl.length * 3) / 4);
+          const ratio = ((1 - compressedSize / originalSize) * 100).toFixed(1);
+
+          console.log(`Image compressed: ${(originalSize / 1024 / 1024).toFixed(2)}MB → ${(compressedSize / 1024 / 1024).toFixed(2)}MB (${ratio}% reduction)`);
+
+          resolve(compressedDataUrl);
+        };
+
+        img.onerror = () => {
+          reject(new Error('Failed to load image'));
+        };
+
+        if (typeof e.target?.result === 'string') {
+          img.src = e.target.result;
+        } else {
+          reject(new Error('Failed to read file'));
+        }
+      };
+
+      reader.onerror = () => {
+        reject(new Error('Failed to read file'));
+      };
+
       reader.readAsDataURL(file);
     });
   }
@@ -1201,8 +1283,10 @@ class SettingsManager {
       this.updatePositionGrids();
       this.updatePositionSettingsVisibility();
 
-      // 초기 로드 시 겹침 확인
-      this.checkOverlap();
+      // 초기 로드 시 겹침 확인 (렌더링 완료 후)
+      setTimeout(() => {
+        this.checkOverlap();
+      }, 100);
     } catch (error) {
       console.error('Failed to load widget settings:', error);
     }
@@ -1414,7 +1498,11 @@ class SettingsManager {
     await this.savePositionSettings();
     this.applyClockPosition(position);
     this.updatePositionGrids();
-    this.checkOverlap();
+
+    // 약간의 지연 후 겹침 확인 (렌더링 완료 대기)
+    setTimeout(() => {
+      this.checkOverlap();
+    }, 50);
   }
 
   /**
@@ -1427,7 +1515,11 @@ class SettingsManager {
     await this.savePositionSettings();
     this.applySearchPosition(position);
     this.updatePositionGrids();
-    this.checkOverlap();
+
+    // 약간의 지연 후 겹침 확인 (렌더링 완료 대기)
+    setTimeout(() => {
+      this.checkOverlap();
+    }, 50);
   }
 
   /**
@@ -1535,6 +1627,7 @@ class SettingsManager {
     if (!clockEnabled && !searchEnabled) {
       this.clockElement.classList.remove('overlap-offset');
       this.searchElement.classList.remove('overlap-offset');
+      this.searchElement.style.width = '';
       return;
     }
 
@@ -1542,6 +1635,7 @@ class SettingsManager {
     if (clockEnabled && !searchEnabled) {
       this.clockElement.classList.remove('overlap-offset');
       this.searchElement.classList.remove('overlap-offset');
+      this.searchElement.style.width = '';
       return;
     }
 
@@ -1549,6 +1643,7 @@ class SettingsManager {
     if (!clockEnabled && searchEnabled) {
       this.clockElement.classList.remove('overlap-offset');
       this.searchElement.classList.remove('overlap-offset');
+      this.searchElement.style.width = '';
       return;
     }
 
@@ -1559,9 +1654,55 @@ class SettingsManager {
     if (isSamePosition) {
       this.clockElement.classList.add('overlap-offset');
       this.searchElement.classList.add('overlap-offset');
+
+      // 시계 너비를 계산하여 검색창 너비 설정
+      this.matchSearchWidthToClock();
+
+      // 왼쪽/오른쪽 정렬 적용
+      this.applyAlignment();
     } else {
       this.clockElement.classList.remove('overlap-offset');
       this.searchElement.classList.remove('overlap-offset');
+      this.searchElement.style.width = '';
+      this.searchElement.style.textAlign = '';
+    }
+  }
+
+  /**
+   * 검색창 너비를 시계 너비에 맞춤
+   */
+  matchSearchWidthToClock() {
+    if (!this.clockElement || !this.searchElement) return;
+
+    // 시계의 실제 너비 계산
+    const clockWidth = this.clockElement.offsetWidth;
+
+    if (clockWidth > 0) {
+      // 검색창의 패딩을 고려하여 너비 설정
+      this.searchElement.style.width = `${clockWidth}px`;
+      this.searchElement.style.maxWidth = `${clockWidth}px`;
+    }
+  }
+
+  /**
+   * 왼쪽/오른쪽 정렬 적용
+   */
+  applyAlignment() {
+    if (!this.searchElement) return;
+
+    const position = this.searchPosition;
+
+    // 왼쪽 위치일 때 왼쪽 정렬
+    if (position.includes('-left')) {
+      this.searchElement.style.textAlign = 'left';
+    }
+    // 오른쪽 위치일 때 오른쪽 정렬
+    else if (position.includes('-right')) {
+      this.searchElement.style.textAlign = 'right';
+    }
+    // 중앙은 기본값
+    else {
+      this.searchElement.style.textAlign = '';
     }
   }
 
