@@ -120,14 +120,84 @@
         <!-- 왼쪽 사이드바 메뉴 -->
         <div class="settings-sidebar">
           <nav class="settings-menu">
-            <button class="settings-menu-item active" data-section="background">배경</button>
+            <button class="settings-menu-item active" data-section="widget">위젯</button>
+            <button class="settings-menu-item" data-section="background">배경</button>
           </nav>
         </div>
 
         <!-- 오른쪽 컨텐츠 -->
         <div class="settings-content">
+          <!-- 위젯 설정 -->
+          <div class="settings-section active" id="settingsWidget">
+            <!-- 시계 위치 -->
+            <div class="settings-subsection">
+              <h3 class="settings-section-title">시계</h3>
+
+              <div class="settings-item">
+                <label class="settings-item-label">시계 표시</label>
+                <div class="toggle-container-inline">
+                  <input type="checkbox" id="clockToggle" class="toggle-input-small" checked>
+                  <label for="clockToggle" class="toggle-label-small">
+                    <span class="toggle-text-small" data-on="ON" data-off="OFF"></span>
+                  </label>
+                </div>
+              </div>
+              <p class="settings-item-description">메인 화면의 시계를 표시하거나 숨깁니다</p>
+
+              <div class="settings-item" id="clockPositionSetting">
+                <label class="settings-item-label">시계 위치</label>
+              </div>
+              <div class="position-grid" id="clockPositionGrid">
+                <button class="position-cell" data-position="top-left" title="왼쪽 위"></button>
+                <button class="position-cell" data-position="top-center" title="중앙 위"></button>
+                <button class="position-cell" data-position="top-right" title="오른쪽 위"></button>
+                <button class="position-cell" data-position="center-left" title="왼쪽 중앙"></button>
+                <button class="position-cell active" data-position="center-center" title="정중앙"></button>
+                <button class="position-cell" data-position="center-right" title="오른쪽 중앙"></button>
+                <button class="position-cell" data-position="bottom-left" title="왼쪽 아래"></button>
+                <button class="position-cell" data-position="bottom-center" title="중앙 아래"></button>
+                <button class="position-cell" data-position="bottom-right" title="오른쪽 아래"></button>
+              </div>
+            </div>
+
+            <div class="settings-divider"></div>
+
+            <!-- 검색창 위치 -->
+            <div class="settings-subsection">
+              <h3 class="settings-section-title">검색창</h3>
+
+              <div class="settings-item">
+                <label class="settings-item-label">검색창 표시</label>
+                <div class="toggle-container-inline">
+                  <input type="checkbox" id="searchToggle" class="toggle-input-small" checked>
+                  <label for="searchToggle" class="toggle-label-small">
+                    <span class="toggle-text-small" data-on="ON" data-off="OFF"></span>
+                  </label>
+                </div>
+              </div>
+              <p class="settings-item-description">메인 화면의 검색창을 표시하거나 숨깁니다</p>
+
+              <div class="settings-item" id="searchPositionSetting">
+                <label class="settings-item-label">검색창 위치</label>
+              </div>
+              <div class="position-grid" id="searchPositionGrid">
+                <button class="position-cell" data-position="top-left" title="왼쪽 위"></button>
+                <button class="position-cell" data-position="top-center" title="중앙 위"></button>
+                <button class="position-cell" data-position="top-right" title="오른쪽 위"></button>
+                <button class="position-cell" data-position="center-left" title="왼쪽 중앙"></button>
+                <button class="position-cell active" data-position="center-center" title="정중앙"></button>
+                <button class="position-cell" data-position="center-right" title="오른쪽 중앙"></button>
+                <button class="position-cell" data-position="bottom-left" title="왼쪽 아래"></button>
+                <button class="position-cell" data-position="bottom-center" title="중앙 아래"></button>
+                <button class="position-cell" data-position="bottom-right" title="오른쪽 아래"></button>
+              </div>
+            </div>
+
+            <div class="settings-divider"></div>
+          </div>
+
           <!-- 배경 설정 -->
-          <div class="settings-section active" id="settingsBackground">
+          <div class="settings-section" id="settingsBackground">
             <!-- 이미지 섹션 -->
             <div class="settings-subsection">
               <h3 class="settings-section-title">이미지</h3>
@@ -142,24 +212,6 @@
                 </div>
               </div>
               <p class="settings-item-description">고정 모드: 한 번 선택된 이미지가 계속 표시됩니다</p>
-            </div>
-
-            <div class="settings-divider"></div>
-
-            <!-- 시계 섹션 -->
-            <div class="settings-subsection">
-              <h3 class="settings-section-title">시계</h3>
-
-              <div class="settings-item">
-                <label class="settings-item-label">시계 표시</label>
-                <div class="toggle-container-inline">
-                  <input type="checkbox" id="clockToggle" class="toggle-input-small" checked>
-                  <label for="clockToggle" class="toggle-label-small">
-                    <span class="toggle-text-small" data-on="ON" data-off="OFF"></span>
-                  </label>
-                </div>
-              </div>
-              <p class="settings-item-description">메인 화면의 시계를 표시하거나 숨깁니다</p>
             </div>
 
             <div class="settings-divider"></div>
@@ -204,12 +256,12 @@
   <!-- 메인 컨텐츠 (중앙) -->
   <main class="main-content">
     <!-- 시계 -->
-    <div class="clock" id="clock">
+    <div class="clock position-center-center overlap-offset" id="clock">
       <div class="time" id="time">00:00</div>
     </div>
 
     <!-- 검색바 -->
-    <div class="search-container">
+    <div class="search-container position-center-center overlap-offset">
       <form class="search-form" id="searchForm">
         <input type="text" class="search-input" id="searchInput" placeholder="Google 검색 또는 URL 입력" autocomplete="off">
         <button type="submit" class="search-btn">

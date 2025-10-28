@@ -334,6 +334,7 @@ class BookmarkManager {
     this.modal = modal;
     /** @type {Array<{name: string, url: string, pinned?: boolean}>} */
     this.bookmarks = [];
+    this.draggedItem = null;
   }
 
   /**
@@ -474,6 +475,14 @@ class BookmarkManager {
     item.appendChild(icon);
     item.appendChild(name);
     item.appendChild(actions);
+
+    // 드래그 앤 드롭 이벤트
+    item.draggable = true;
+    item.addEventListener('dragstart', (e) => this.handleDragStart(e, index));
+    item.addEventListener('dragend', (e) => this.handleDragEnd(e));
+    item.addEventListener('dragover', (e) => this.handleDragOver(e));
+    item.addEventListener('drop', (e) => this.handleDrop(e, index));
+    item.addEventListener('dragleave', (e) => this.handleDragLeave(e));
 
     return item;
   }
@@ -628,6 +637,94 @@ class BookmarkManager {
       this.renderBookmarks();
       this.renderPinnedBookmarks();
     }
+  }
+
+  /**
+   * 드래그 시작
+   * @param {DragEvent} event
+   * @param {number} index
+   */
+  handleDragStart(event, index) {
+    this.draggedItem = index;
+    const target = event.currentTarget;
+    if (target instanceof HTMLElement) {
+      target.classList.add('dragging');
+    }
+    if (event.dataTransfer) {
+      event.dataTransfer.effectAllowed = 'move';
+    }
+  }
+
+  /**
+   * 드래그 종료
+   * @param {DragEvent} event
+   */
+  handleDragEnd(event) {
+    const target = event.currentTarget;
+    if (target instanceof HTMLElement) {
+      target.classList.remove('dragging');
+    }
+    // 모든 drag-over 클래스 제거
+    document.querySelectorAll('.bookmark-item.drag-over').forEach((el) => {
+      el.classList.remove('drag-over');
+    });
+  }
+
+  /**
+   * 드래그 오버
+   * @param {DragEvent} event
+   */
+  handleDragOver(event) {
+    event.preventDefault();
+    const target = event.currentTarget;
+    if (target instanceof HTMLElement) {
+      target.classList.add('drag-over');
+    }
+    if (event.dataTransfer) {
+      event.dataTransfer.dropEffect = 'move';
+    }
+  }
+
+  /**
+   * 드래그 리브
+   * @param {DragEvent} event
+   */
+  handleDragLeave(event) {
+    const target = event.currentTarget;
+    if (target instanceof HTMLElement) {
+      target.classList.remove('drag-over');
+    }
+  }
+
+  /**
+   * 드롭
+   * @param {DragEvent} event
+   * @param {number} targetIndex
+   */
+  async handleDrop(event, targetIndex) {
+    event.preventDefault();
+    const target = event.currentTarget;
+    if (target instanceof HTMLElement) {
+      target.classList.remove('drag-over');
+    }
+
+    if (this.draggedItem === null || this.draggedItem === targetIndex) {
+      return;
+    }
+
+    // 배열 순서 변경
+    const draggedBookmark = this.bookmarks[this.draggedItem];
+    this.bookmarks.splice(this.draggedItem, 1);
+
+    // targetIndex 조정
+    const newIndex = this.draggedItem < targetIndex ? targetIndex - 1 : targetIndex;
+    this.bookmarks.splice(newIndex, 0, draggedBookmark);
+
+    await this.saveBookmarks();
+    this.renderBookmarks();
+    this.renderPinnedBookmarks();
+
+    this.draggedItem = null;
   }
 }
 
@@ -886,10 +983,16 @@ class SettingsManager {
     this.backgroundManager = backgroundManager;
     this.randomToggle = null;
     this.clockToggle = null;
+    this.searchToggle = null;
     this.blurToggle = null;
     this.opacitySlider = null;
     this.overlayElement = null;
     this.clockElement = null;
+    this.searchElement = null;
+    this.clockPositionGrid = null;
+    this.searchPositionGrid = null;
+    this.clockPosition = 'center-center';
+    this.searchPosition = 'center-center';
   }
 
   /**
@@ -898,12 +1001,27 @@ class SettingsManager {
   initialize() {
     this.randomToggle = document.getElementById('randomImageToggle');
     this.clockToggle = document.getElementById('clockToggle');
+    this.searchToggle = document.getElementById('searchToggle');
     this.blurToggle = document.getElementById('blurToggle');
     this.opacitySlider = document.getElementById('opacitySlider');
     this.overlayElement = document.querySelector('.overlay');
     this.clockElement = document.getElementById('clock');
+    this.searchElement = document.querySelector('.search-container');
+    this.clockPositionGrid = document.getElementById('clockPositionGrid');
+    this.searchPositionGrid = document.getElementById('searchPositionGrid');
 
-    if (!this.randomToggle || !this.clockToggle || !this.blurToggle || !this.opacitySlider || !this.overlayElement || !this.clockElement) {
+    if (
+      !this.randomToggle ||
+      !this.clockToggle ||
+      !this.searchToggle ||
+      !this.blurToggle ||
+      !this.opacitySlider ||
+      !this.overlayElement ||
+      !this.clockElement ||
+      !this.searchElement ||
+      !this.clockPositionGrid ||
+      !this.searchPositionGrid
+    ) {
       console.error('Settings elements not found');
       return;
     }
@@ -956,6 +1074,11 @@ class SettingsManager {
       this.clockToggle.addEventListener('change', () => this.handleClockToggle());
     }
 
+    // 검색창 토글
+    if (this.searchToggle instanceof HTMLInputElement) {
+      this.searchToggle.addEventListener('change', () => this.handleSearchToggle());
+    }
+
     // 블러 토글
     if (this.blurToggle instanceof HTMLInputElement) {
       this.blurToggle.addEventListener('change', () => this.handleBlurToggle());
@@ -972,6 +1095,32 @@ class SettingsManager {
           const valueDisplay = document.getElementById('opacityValue');
           if (valueDisplay) {
             valueDisplay.textContent = target.value;
+          }
+        }
+      });
+    }
+
+    // 시계 위치 그리드
+    if (this.clockPositionGrid) {
+      this.clockPositionGrid.addEventListener('click', (e) => {
+        const target = e.target;
+        if (target instanceof HTMLElement && target.classList.contains('position-cell')) {
+          const position = target.dataset.position;
+          if (position) {
+            this.handleClockPositionChange(position);
+          }
+        }
+      });
+    }
+
+    // 검색창 위치 그리드
+    if (this.searchPositionGrid) {
+      this.searchPositionGrid.addEventListener('click', (e) => {
+        const target = e.target;
+        if (target instanceof HTMLElement && target.classList.contains('position-cell')) {
+          const position = target.dataset.position;
+          if (position) {
+            this.handleSearchPositionChange(position);
           }
         }
       });
@@ -1029,18 +1178,33 @@ class SettingsManager {
       this.randomToggle.checked = this.backgroundManager.isRandomMode;
     }
 
-    // 시계 표시 설정
+    // 위젯 표시 설정
     try {
-      const result = await chrome.storage.local.get(['clockEnabled']);
+      const result = await chrome.storage.local.get(['clockEnabled', 'searchEnabled', 'clockPosition', 'searchPosition']);
       const clockEnabled = result.clockEnabled !== false; // 기본값 true
+      const searchEnabled = result.searchEnabled !== false; // 기본값 true
+      this.clockPosition = result.clockPosition || 'center-center';
+      this.searchPosition = result.searchPosition || 'center-center';
 
       if (this.clockToggle instanceof HTMLInputElement) {
         this.clockToggle.checked = clockEnabled;
       }
 
+      if (this.searchToggle instanceof HTMLInputElement) {
+        this.searchToggle.checked = searchEnabled;
+      }
+
       this.applyClockSetting(clockEnabled);
+      this.applySearchSetting(searchEnabled);
+      this.applyClockPosition(this.clockPosition);
+      this.applySearchPosition(this.searchPosition);
+      this.updatePositionGrids();
+      this.updatePositionSettingsVisibility();
+
+      // 초기 로드 시 겹침 확인
+      this.checkOverlap();
     } catch (error) {
-      console.error('Failed to load clock setting:', error);
+      console.error('Failed to load widget settings:', error);
     }
 
     // 블러 설정
@@ -1088,6 +1252,21 @@ class SettingsManager {
       const clockEnabled = this.clockToggle.checked;
       await this.saveClockSetting(clockEnabled);
       this.applyClockSetting(clockEnabled);
+      this.checkOverlap();
+      this.updatePositionSettingsVisibility();
+    }
+  }
+
+  /**
+   * 검색창 토글 처리
+   */
+  async handleSearchToggle() {
+    if (this.searchToggle instanceof HTMLInputElement) {
+      const searchEnabled = this.searchToggle.checked;
+      await this.saveSearchSetting(searchEnabled);
+      this.applySearchSetting(searchEnabled);
+      this.checkOverlap();
+      this.updatePositionSettingsVisibility();
     }
   }
 
@@ -1186,6 +1365,20 @@ class SettingsManager {
   }
 
   /**
+   * 검색창 설정 적용
+   * @param {boolean} enabled
+   */
+  applySearchSetting(enabled) {
+    if (this.searchElement) {
+      if (enabled) {
+        this.searchElement.style.display = 'block';
+      } else {
+        this.searchElement.style.display = 'none';
+      }
+    }
+  }
+
+  /**
    * 시계 설정 저장
    * @param {boolean} enabled
    */
@@ -1194,6 +1387,227 @@ class SettingsManager {
       await chrome.storage.local.set({ clockEnabled: enabled });
     } catch (error) {
       console.error('Failed to save clock setting:', error);
+    }
+  }
+
+  /**
+   * 검색창 설정 저장
+   * @param {boolean} enabled
+   */
+  async saveSearchSetting(enabled) {
+    try {
+      await chrome.storage.local.set({ searchEnabled: enabled });
+    } catch (error) {
+      console.error('Failed to save search setting:', error);
+    }
+  }
+
+  /**
+   * 시계 위치 변경 처리
+   * @param {string} position
+   */
+  async handleClockPositionChange(position) {
+    this.clockPosition = position;
+    await this.savePositionSettings();
+    this.applyClockPosition(position);
+    this.updatePositionGrids();
+    this.checkOverlap();
+  }
+
+  /**
+   * 검색창 위치 변경 처리
+   * @param {string} position
+   */
+  async handleSearchPositionChange(position) {
+    this.searchPosition = position;
+    await this.savePositionSettings();
+    this.applySearchPosition(position);
+    this.updatePositionGrids();
+    this.checkOverlap();
+  }
+
+  /**
+   * 시계 위치 적용
+   * @param {string} position
+   */
+  applyClockPosition(position) {
+    if (this.clockElement) {
+      // 인라인 스타일 초기화 (애니메이션을 위해)
+      this.clockElement.style.top = '';
+      this.clockElement.style.bottom = '';
+      this.clockElement.style.left = '';
+      this.clockElement.style.right = '';
+
+      // 모든 위치 클래스 제거
+      this.clockElement.className = 'clock';
+      // 새 위치 클래스 추가
+      this.clockElement.classList.add(`position-${position}`);
+    }
+  }
+
+  /**
+   * 검색창 위치 적용
+   * @param {string} position
+   */
+  applySearchPosition(position) {
+    if (this.searchElement) {
+      // 인라인 스타일 초기화 (애니메이션을 위해)
+      this.searchElement.style.top = '';
+      this.searchElement.style.bottom = '';
+      this.searchElement.style.left = '';
+      this.searchElement.style.right = '';
+
+      // 모든 위치 클래스 제거
+      this.searchElement.className = 'search-container';
+      // 새 위치 클래스 추가
+      this.searchElement.classList.add(`position-${position}`);
+    }
+
+    // 고정 즐겨찾기 숨김 처리 (비활성화)
+    // this.updatePinnedBookmarksVisibility(position);
+  }
+
+  /**
+   * 위치 그리드 업데이트
+   */
+  updatePositionGrids() {
+    // 시계 위치 그리드
+    if (this.clockPositionGrid) {
+      const cells = this.clockPositionGrid.querySelectorAll('.position-cell');
+      cells.forEach((cell) => {
+        if (cell instanceof HTMLElement) {
+          if (cell.dataset.position === this.clockPosition) {
+            cell.classList.add('active');
+          } else {
+            cell.classList.remove('active');
+          }
+        }
+      });
+    }
+
+    // 검색창 위치 그리드
+    if (this.searchPositionGrid) {
+      const cells = this.searchPositionGrid.querySelectorAll('.position-cell');
+      cells.forEach((cell) => {
+        if (cell instanceof HTMLElement) {
+          if (cell.dataset.position === this.searchPosition) {
+            cell.classList.add('active');
+          } else {
+            cell.classList.remove('active');
+          }
+        }
+      });
+    }
+  }
+
+  /**
+   * 겹침 확인 및 조정
+   */
+  checkOverlap() {
+    if (!this.clockElement || !this.searchElement) return;
+
+    const clockEnabled = this.clockToggle instanceof HTMLInputElement ? this.clockToggle.checked : true;
+    const searchEnabled = this.searchToggle instanceof HTMLInputElement ? this.searchToggle.checked : true;
+
+    // 둘 다 비활성화면 오프셋 제거
+    if (!clockEnabled && !searchEnabled) {
+      this.clockElement.classList.remove('overlap-offset');
+      this.searchElement.classList.remove('overlap-offset');
+      return;
+    }
+
+    // 시계만 활성화
+    if (clockEnabled && !searchEnabled) {
+      this.clockElement.classList.remove('overlap-offset');
+      this.searchElement.classList.remove('overlap-offset');
+      return;
+    }
+
+    // 검색창만 활성화
+    if (!clockEnabled && searchEnabled) {
+      this.clockElement.classList.remove('overlap-offset');
+      this.searchElement.classList.remove('overlap-offset');
+      return;
+    }
+
+    // 둘 다 활성화된 경우 겹침 검사
+    const isSamePosition = this.clockPosition === this.searchPosition;
+
+    // 같은 위치일 때 오프셋 적용
+    if (isSamePosition) {
+      this.clockElement.classList.add('overlap-offset');
+      this.searchElement.classList.add('overlap-offset');
+    } else {
+      this.clockElement.classList.remove('overlap-offset');
+      this.searchElement.classList.remove('overlap-offset');
+    }
+  }
+
+  /**
+   * 고정 즐겨찾기 표시 여부 업데이트
+   * @param {string} searchPosition
+   */
+  updatePinnedBookmarksVisibility(searchPosition) {
+    const pinnedBookmarks = document.getElementById('pinnedBookmarks');
+    if (pinnedBookmarks) {
+      const searchEnabled = this.searchToggle instanceof HTMLInputElement ? this.searchToggle.checked : true;
+      // 검색창이 활성화되어 있고 왼쪽에 있을 때 고정 즐겨찾기 숨김
+      const isLeftPosition = searchPosition.includes('-left');
+
+      if (searchEnabled && isLeftPosition) {
+        pinnedBookmarks.classList.add('hidden');
+      } else {
+        pinnedBookmarks.classList.remove('hidden');
+      }
+    }
+  }
+
+  /**
+   * 위치 설정 표시 여부 업데이트
+   */
+  updatePositionSettingsVisibility() {
+    const clockPositionSetting = document.getElementById('clockPositionSetting');
+    const searchPositionSetting = document.getElementById('searchPositionSetting');
+
+    const clockEnabled = this.clockToggle instanceof HTMLInputElement ? this.clockToggle.checked : true;
+    const searchEnabled = this.searchToggle instanceof HTMLInputElement ? this.searchToggle.checked : true;
+
+    // 시계 위치 설정 표시/숨김
+    if (clockPositionSetting) {
+      const clockGrid = this.clockPositionGrid;
+      if (clockEnabled) {
+        clockPositionSetting.style.display = 'flex';
+        if (clockGrid) clockGrid.style.display = 'grid';
+      } else {
+        clockPositionSetting.style.display = 'none';
+        if (clockGrid) clockGrid.style.display = 'none';
+      }
+    }
+
+    // 검색창 위치 설정 표시/숨김
+    if (searchPositionSetting) {
+      const searchGrid = this.searchPositionGrid;
+      if (searchEnabled) {
+        searchPositionSetting.style.display = 'flex';
+        if (searchGrid) searchGrid.style.display = 'grid';
+      } else {
+        searchPositionSetting.style.display = 'none';
+        if (searchGrid) searchGrid.style.display = 'none';
+      }
+    }
+  }
+
+  /**
+   * 위치 설정 저장
+   */
+  async savePositionSettings() {
+    try {
+      await chrome.storage.local.set({
+        clockPosition: this.clockPosition,
+        searchPosition: this.searchPosition,
+      });
+    } catch (error) {
+      console.error('Failed to save position settings:', error);
     }
   }
 }
