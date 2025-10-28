@@ -5,7 +5,7 @@
  * 파일 위치: /my-newtab-extension/newtab.js
  * 파일명: newtab.js
  * 용도: New Tab 페이지의 동적 기능 구현
- * 기능: 시계 업데이트, 검색, 즐겨찾기 관리, 시간대별 배경 이미지 변경
+ * 기능: 시계, 검색, 즐겨찾기(고정 기능 포함), 이미지 관리, 설정
  * 책임: UI 상호작용 및 비즈니스 로직 처리 (단일 책임 원칙 준수)
  */
 
@@ -37,13 +37,12 @@ class ClockManager {
   updateClock() {
     const now = new Date();
 
-    // 시간 표시
+    // 시간 표시 (HH:mm)
     const hours = String(now.getHours()).padStart(2, '0');
     const minutes = String(now.getMinutes()).padStart(2, '0');
-    const seconds = String(now.getSeconds()).padStart(2, '0');
-    this.timeElement.textContent = `${hours}:${minutes}:${seconds}`;
+    this.timeElement.textContent = `${hours}:${minutes}`;
 
-    // 날짜 표시
+    // 날짜 표시 (yyyy년 mm월 dd일 요일)
     const year = now.getFullYear();
     const month = now.getMonth() + 1;
     const date = now.getDate();
@@ -55,7 +54,7 @@ class ClockManager {
 
 /**
  * 배경 이미지 관리 클래스
- * 책임: 랜덤 배경 이미지 로드 및 표시 (로컬 이미지 + 사용자 업로드 이미지)
+ * 책임: 랜덤/고정 배경 이미지 로드 및 표시
  */
 class BackgroundManager {
   /**
@@ -66,6 +65,8 @@ class BackgroundManager {
     this.imageExtensions = ['.jpg', '.jpeg', '.png', '.webp'];
     /** @type {string[]} */
     this.uploadedImages = [];
+    this.isRandomMode = true;
+    this.fixedImage = null;
   }
 
   /**
@@ -73,7 +74,8 @@ class BackgroundManager {
    */
   async initialize() {
     await this.loadUploadedImages();
-    await this.loadRandomBackground();
+    await this.loadSettings();
+    await this.loadBackground();
   }
 
   /**
@@ -90,9 +92,22 @@ class BackgroundManager {
   }
 
   /**
-   * 랜덤 배경 이미지 로드 (로컬 이미지 + 업로드 이미지)
+   * 설정 로드
    */
-  async loadRandomBackground() {
+  async loadSettings() {
+    try {
+      const result = await chrome.storage.local.get(['isRandomMode', 'fixedImage']);
+      this.isRandomMode = result.isRandomMode !== false;
+      this.fixedImage = result.fixedImage || null;
+    } catch (error) {
+      console.error('Failed to load settings:', error);
+    }
+  }
+
+  /**
+   * 배경 이미지 로드
+   */
+  async loadBackground() {
     try {
       const allImages = await this.getAllImages();
 
@@ -102,9 +117,23 @@ class BackgroundManager {
         return;
       }
 
-      // 랜덤 이미지 선택
-      const randomImage = allImages[Math.floor(Math.random() * allImages.length)];
-      this.backgroundElement.style.backgroundImage = `url('${randomImage}')`;
+      let imageToShow;
+
+      if (this.isRandomMode) {
+        // 랜덤 모드: 매번 다른 이미지
+        imageToShow = allImages[Math.floor(Math.random() * allImages.length)];
+      } else {
+        // 고정 모드: 저장된 이미지 사용, 없으면 첫 번째 이미지
+        if (this.fixedImage && allImages.includes(this.fixedImage)) {
+          imageToShow = this.fixedImage;
+        } else {
+          imageToShow = allImages[0];
+          this.fixedImage = imageToShow;
+          await this.saveSettings();
+        }
+      }
+
+      this.backgroundElement.style.backgroundImage = `url('${imageToShow}')`;
     } catch (error) {
       console.error('Failed to load background image:', error);
       this.setFallbackBackground();
@@ -112,12 +141,18 @@ class BackgroundManager {
   }
 
   /**
-   * 모든 이미지 목록 가져오기 (로컬 + 업로드)
+   * 모든 이미지 목록 가져오기 (업로드 이미지 우선)
    * @returns {Promise<string[]>}
    */
   async getAllImages() {
+    // 업로드된 이미지가 있으면 업로드 이미지만 사용
+    if (this.uploadedImages.length > 0) {
+      return this.uploadedImages;
+    }
+
+    // 없으면 로컬 이미지 사용
     const localImages = this.getLocalImageList();
-    return [...this.uploadedImages, ...localImages];
+    return localImages;
   }
 
   /**
@@ -149,6 +184,11 @@ class BackgroundManager {
    * @param {string} imageData - Base64 이미지 데이터
    */
   async addImage(imageData) {
+    // 최대 50개 제한
+    if (this.uploadedImages.length >= 50) {
+      throw new Error('최대 50개까지만 업로드할 수 있습니다.');
+    }
+
     this.uploadedImages.push(imageData);
     await this.saveUploadedImages();
   }
@@ -160,6 +200,13 @@ class BackgroundManager {
   async removeImage(index) {
     this.uploadedImages.splice(index, 1);
     await this.saveUploadedImages();
+
+    // 고정 모드에서 고정된 이미지를 삭제한 경우
+    if (!this.isRandomMode && this.fixedImage === this.uploadedImages[index]) {
+      this.fixedImage = null;
+      await this.saveSettings();
+      await this.loadBackground();
+    }
   }
 
   /**
@@ -170,6 +217,39 @@ class BackgroundManager {
       await chrome.storage.local.set({ uploadedImages: this.uploadedImages });
     } catch (error) {
       console.error('Failed to save uploaded images:', error);
+    }
+  }
+
+  /**
+   * 랜덤/고정 모드 토글
+   * @param {boolean} isRandom - 랜덤 모드 여부
+   */
+  async setRandomMode(isRandom) {
+    this.isRandomMode = isRandom;
+
+    if (!isRandom) {
+      // 고정 모드로 변경: 현재 표시된 이미지를 고정
+      const currentBg = this.backgroundElement.style.backgroundImage;
+      const urlMatch = currentBg.match(/url\(['"]?([^'"]+)['"]?\)/);
+      if (urlMatch) {
+        this.fixedImage = urlMatch[1];
+      }
+    }
+
+    await this.saveSettings();
+  }
+
+  /**
+   * 설정 저장
+   */
+  async saveSettings() {
+    try {
+      await chrome.storage.local.set({
+        isRandomMode: this.isRandomMode,
+        fixedImage: this.fixedImage,
+      });
+    } catch (error) {
+      console.error('Failed to save settings:', error);
     }
   }
 }
@@ -234,19 +314,25 @@ class SearchManager {
 
 /**
  * 즐겨찾기 관리 클래스
- * 책임: 즐겨찾기 CRUD 작업 및 로컬 저장소 관리
+ * 책임: 즐겨찾기 CRUD 작업 및 로컬 저장소 관리 (고정 기능 포함)
  */
 class BookmarkManager {
   /**
    * @param {HTMLElement} bookmarksList - 즐겨찾기 목록 요소
+   * @param {HTMLElement} pinnedBookmarks - 고정된 즐겨찾기 영역
+   * @param {HTMLElement} sidebar - 사이드바 요소
+   * @param {HTMLElement} toggleBtn - 토글 버튼
    * @param {HTMLElement} addBtn - 추가 버튼 요소
    * @param {HTMLElement} modal - 모달 요소
    */
-  constructor(bookmarksList, addBtn, modal) {
+  constructor(bookmarksList, pinnedBookmarks, sidebar, toggleBtn, addBtn, modal) {
     this.bookmarksList = bookmarksList;
+    this.pinnedBookmarks = pinnedBookmarks;
+    this.sidebar = sidebar;
+    this.toggleBtn = toggleBtn;
     this.addBtn = addBtn;
     this.modal = modal;
-    /** @type {Array<{name: string, url: string}>} */
+    /** @type {Array<{name: string, url: string, pinned?: boolean}>} */
     this.bookmarks = [];
   }
 
@@ -256,6 +342,7 @@ class BookmarkManager {
   async initialize() {
     await this.loadBookmarks();
     this.renderBookmarks();
+    this.renderPinnedBookmarks();
     this.setupEventListeners();
   }
 
@@ -274,12 +361,12 @@ class BookmarkManager {
 
   /**
    * 기본 즐겨찾기 반환
-   * @returns {Array<{name: string, url: string}>}
+   * @returns {Array<{name: string, url: string, pinned?: boolean}>}
    */
   getDefaultBookmarks() {
     return [
-      { name: 'Google', url: 'https://www.google.com' },
-      { name: 'YouTube', url: 'https://www.youtube.com' },
+      { name: 'Google', url: 'https://www.google.com', pinned: true },
+      { name: 'YouTube', url: 'https://www.youtube.com', pinned: true },
       { name: 'GitHub', url: 'https://github.com' },
       { name: 'Gmail', url: 'https://mail.google.com' },
     ];
@@ -297,7 +384,7 @@ class BookmarkManager {
   }
 
   /**
-   * 즐겨찾기 렌더링
+   * 즐겨찾기 렌더링 (사이드바)
    */
   renderBookmarks() {
     this.bookmarksList.innerHTML = '';
@@ -309,8 +396,22 @@ class BookmarkManager {
   }
 
   /**
-   * 즐겨찾기 요소 생성
-   * @param {{name: string, url: string}} bookmark - 즐겨찾기 데이터
+   * 고정된 즐겨찾기 렌더링
+   */
+  renderPinnedBookmarks() {
+    this.pinnedBookmarks.innerHTML = '';
+
+    const pinned = this.bookmarks.filter((b) => b.pinned);
+
+    pinned.forEach((bookmark) => {
+      const item = this.createPinnedBookmarkElement(bookmark);
+      this.pinnedBookmarks.appendChild(item);
+    });
+  }
+
+  /**
+   * 즐겨찾기 요소 생성 (사이드바용)
+   * @param {{name: string, url: string, pinned?: boolean}} bookmark - 즐겨찾기 데이터
    * @param {number} index - 인덱스
    * @returns {HTMLElement}
    */
@@ -325,14 +426,27 @@ class BookmarkManager {
     icon.src = `https://www.google.com/s2/favicons?domain=${bookmark.url}&sz=32`;
     icon.alt = bookmark.name;
     icon.onerror = () => {
-      icon.src =
-        'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23666"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8z"/></svg>';
+      icon.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23666"><circle cx="12" cy="12" r="10"/></svg>';
     };
 
     const name = document.createElement('span');
     name.className = 'bookmark-name';
     name.textContent = bookmark.name;
 
+    const actions = document.createElement('div');
+    actions.className = 'bookmark-actions';
+
+    // 고정 버튼
+    const pinBtn = document.createElement('button');
+    pinBtn.className = bookmark.pinned ? 'bookmark-pin pinned' : 'bookmark-pin';
+    pinBtn.innerHTML = '📌';
+    pinBtn.title = bookmark.pinned ? '고정 해제' : '고정';
+    pinBtn.onclick = (e) => {
+      e.preventDefault();
+      this.togglePin(index);
+    };
+
+    // 삭제 버튼
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'bookmark-delete';
     deleteBtn.textContent = '×';
@@ -341,9 +455,41 @@ class BookmarkManager {
       this.deleteBookmark(index);
     };
 
+    actions.appendChild(pinBtn);
+    actions.appendChild(deleteBtn);
+
     item.appendChild(icon);
     item.appendChild(name);
-    item.appendChild(deleteBtn);
+    item.appendChild(actions);
+
+    return item;
+  }
+
+  /**
+   * 고정된 즐겨찾기 요소 생성
+   * @param {{name: string, url: string}} bookmark - 즐겨찾기 데이터
+   * @returns {HTMLElement}
+   */
+  createPinnedBookmarkElement(bookmark) {
+    const item = document.createElement('a');
+    item.className = 'pinned-bookmark-item';
+    item.href = bookmark.url;
+    item.target = '_blank';
+
+    const icon = document.createElement('img');
+    icon.className = 'bookmark-icon';
+    icon.src = `https://www.google.com/s2/favicons?domain=${bookmark.url}&sz=32`;
+    icon.alt = bookmark.name;
+    icon.onerror = () => {
+      icon.src = 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23666"><circle cx="12" cy="12" r="10"/></svg>';
+    };
+
+    const name = document.createElement('span');
+    name.className = 'bookmark-name';
+    name.textContent = bookmark.name;
+
+    item.appendChild(icon);
+    item.appendChild(name);
 
     return item;
   }
@@ -352,6 +498,17 @@ class BookmarkManager {
    * 이벤트 리스너 설정
    */
   setupEventListeners() {
+    // 토글 버튼
+    this.toggleBtn.addEventListener('click', () => this.toggleSidebar());
+
+    // 사이드바 외부 클릭시 닫기
+    document.addEventListener('click', (e) => {
+      const target = e.target;
+      if (target instanceof Node && !this.sidebar.contains(target) && !this.toggleBtn.contains(target) && this.sidebar.classList.contains('active')) {
+        this.closeSidebar();
+      }
+    });
+
     // 추가 버튼
     this.addBtn.addEventListener('click', () => this.openModal());
 
@@ -373,6 +530,20 @@ class BookmarkManager {
         this.closeModal();
       }
     });
+  }
+
+  /**
+   * 사이드바 토글
+   */
+  toggleSidebar() {
+    this.sidebar.classList.toggle('active');
+  }
+
+  /**
+   * 사이드바 닫기
+   */
+  closeSidebar() {
+    this.sidebar.classList.remove('active');
   }
 
   /**
@@ -416,10 +587,21 @@ class BookmarkManager {
 
     if (!name || !url) return;
 
-    this.bookmarks.push({ name, url });
+    this.bookmarks.push({ name, url, pinned: false });
     await this.saveBookmarks();
     this.renderBookmarks();
     this.closeModal();
+  }
+
+  /**
+   * 즐겨찾기 고정/해제 토글
+   * @param {number} index - 토글할 인덱스
+   */
+  async togglePin(index) {
+    this.bookmarks[index].pinned = !this.bookmarks[index].pinned;
+    await this.saveBookmarks();
+    this.renderBookmarks();
+    this.renderPinnedBookmarks();
   }
 
   /**
@@ -431,6 +613,7 @@ class BookmarkManager {
       this.bookmarks.splice(index, 1);
       await this.saveBookmarks();
       this.renderBookmarks();
+      this.renderPinnedBookmarks();
     }
   }
 }
@@ -441,18 +624,19 @@ class BookmarkManager {
  */
 class ImageManager {
   /**
-   * @param {HTMLElement} modal - 이미지 관리 모달
-   * @param {HTMLElement} manageBtn - 이미지 관리 버튼
+   * @param {HTMLElement} sidebar - 이미지 사이드바
+   * @param {HTMLElement} toggleBtn - 토글 버튼
    * @param {BackgroundManager} backgroundManager - 배경 관리자
    */
-  constructor(modal, manageBtn, backgroundManager) {
-    this.modal = modal;
-    this.manageBtn = manageBtn;
+  constructor(sidebar, toggleBtn, backgroundManager) {
+    this.sidebar = sidebar;
+    this.toggleBtn = toggleBtn;
     this.backgroundManager = backgroundManager;
     this.uploadArea = null;
     this.imageUpload = null;
     this.imagesGrid = null;
     this.maxFileSize = 5 * 1024 * 1024; // 5MB
+    this.maxImages = 50;
   }
 
   /**
@@ -476,19 +660,20 @@ class ImageManager {
    * 이벤트 리스너 설정
    */
   setupEventListeners() {
-    // 이미지 관리 버튼
-    this.manageBtn.addEventListener('click', () => this.openModal());
+    // 토글 버튼
+    this.toggleBtn.addEventListener('click', () => this.toggleSidebar());
 
     // 닫기 버튼
-    const closeBtn = document.getElementById('closeImagesBtn');
+    const closeBtn = document.getElementById('closeImagesSidebar');
     if (closeBtn) {
-      closeBtn.addEventListener('click', () => this.closeModal());
+      closeBtn.addEventListener('click', () => this.closeSidebar());
     }
 
-    // 모달 배경 클릭
-    this.modal.addEventListener('click', (e) => {
-      if (e.target === this.modal) {
-        this.closeModal();
+    // 사이드바 외부 클릭시 닫기
+    document.addEventListener('click', (e) => {
+      const target = e.target;
+      if (target instanceof Node && !this.sidebar.contains(target) && !this.toggleBtn.contains(target) && this.sidebar.classList.contains('active')) {
+        this.closeSidebar();
       }
     });
 
@@ -516,18 +701,20 @@ class ImageManager {
   }
 
   /**
-   * 모달 열기
+   * 사이드바 토글
    */
-  openModal() {
-    this.modal.classList.add('active');
-    this.renderImages();
+  toggleSidebar() {
+    this.sidebar.classList.toggle('active');
+    if (this.sidebar.classList.contains('active')) {
+      this.renderImages();
+    }
   }
 
   /**
-   * 모달 닫기
+   * 사이드바 닫기
    */
-  closeModal() {
-    this.modal.classList.remove('active');
+  closeSidebar() {
+    this.sidebar.classList.remove('active');
   }
 
   /**
@@ -538,7 +725,7 @@ class ImageManager {
     const target = event.target;
     if (target instanceof HTMLInputElement && target.files) {
       this.handleFiles(Array.from(target.files));
-      target.value = ''; // 같은 파일 재선택 가능하도록
+      target.value = '';
     }
   }
 
@@ -549,8 +736,13 @@ class ImageManager {
   async handleFiles(files) {
     const imageFiles = files.filter((file) => file.type.startsWith('image/'));
 
+    const currentCount = this.backgroundManager.getUploadedImages().length;
+    if (currentCount + imageFiles.length > this.maxImages) {
+      alert(`최대 ${this.maxImages}개까지만 업로드할 수 있습니다. (현재: ${currentCount}개)`);
+      return;
+    }
+
     for (const file of imageFiles) {
-      // 파일 크기 체크
       if (file.size > this.maxFileSize) {
         alert(`${file.name}은(는) 너무 큽니다. 5MB 이하의 이미지만 업로드 가능합니다.`);
         continue;
@@ -561,7 +753,9 @@ class ImageManager {
         await this.backgroundManager.addImage(imageData);
       } catch (error) {
         console.error('Failed to upload image:', error);
-        alert(`${file.name} 업로드에 실패했습니다.`);
+        if (error instanceof Error) {
+          alert(error.message);
+        }
       }
     }
 
@@ -636,21 +830,16 @@ class ImageManager {
       this.deleteImage(index);
     };
 
-    const info = document.createElement('div');
-    info.className = 'image-info';
-
-    const size = document.createElement('div');
-    size.className = 'image-size';
-    size.textContent = this.formatFileSize(imageData.length);
-
-    info.appendChild(size);
     item.appendChild(img);
     item.appendChild(deleteBtn);
-    item.appendChild(info);
 
-    // 이미지 클릭 시 미리보기
-    item.onclick = () => {
+    // 이미지 클릭 시 배경으로 설정 (고정 모드에서만)
+    item.onclick = async () => {
       this.backgroundManager.backgroundElement.style.backgroundImage = `url('${imageData}')`;
+      if (!this.backgroundManager.isRandomMode) {
+        this.backgroundManager.fixedImage = imageData;
+        await this.backgroundManager.saveSettings();
+      }
     };
 
     return item;
@@ -666,16 +855,103 @@ class ImageManager {
       this.renderImages();
     }
   }
+}
+
+/**
+ * 설정 관리 클래스
+ * 책임: 설정 UI 및 설정 저장/로드
+ */
+class SettingsManager {
+  /**
+   * @param {HTMLElement} modal - 설정 모달
+   * @param {HTMLElement} toggleBtn - 토글 버튼
+   * @param {BackgroundManager} backgroundManager - 배경 관리자
+   */
+  constructor(modal, toggleBtn, backgroundManager) {
+    this.modal = modal;
+    this.toggleBtn = toggleBtn;
+    this.backgroundManager = backgroundManager;
+    this.randomToggle = null;
+  }
 
   /**
-   * 파일 크기 포맷팅
-   * @param {number} bytes
-   * @returns {string}
+   * 설정 기능 초기화
    */
-  formatFileSize(bytes) {
-    if (bytes < 1024) return bytes + ' B';
-    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+  initialize() {
+    this.randomToggle = document.getElementById('randomImageToggle');
+
+    if (!this.randomToggle) {
+      console.error('Settings elements not found');
+      return;
+    }
+
+    this.setupEventListeners();
+    this.loadSettings();
+  }
+
+  /**
+   * 이벤트 리스너 설정
+   */
+  setupEventListeners() {
+    // 토글 버튼
+    this.toggleBtn.addEventListener('click', () => this.openModal());
+
+    // 닫기 버튼
+    const closeBtn = document.getElementById('closeSettingsBtn');
+    if (closeBtn) {
+      closeBtn.addEventListener('click', () => this.closeModal());
+    }
+
+    // 모달 배경 클릭
+    this.modal.addEventListener('click', (e) => {
+      if (e.target === this.modal) {
+        this.closeModal();
+      }
+    });
+
+    // 랜덤 이미지 토글
+    if (this.randomToggle instanceof HTMLInputElement) {
+      this.randomToggle.addEventListener('change', () => this.handleRandomToggle());
+    }
+  }
+
+  /**
+   * 모달 열기
+   */
+  openModal() {
+    this.modal.classList.add('active');
+  }
+
+  /**
+   * 모달 닫기
+   */
+  closeModal() {
+    this.modal.classList.remove('active');
+  }
+
+  /**
+   * 설정 로드
+   */
+  loadSettings() {
+    if (this.randomToggle instanceof HTMLInputElement) {
+      this.randomToggle.checked = this.backgroundManager.isRandomMode;
+    }
+  }
+
+  /**
+   * 랜덤 이미지 토글 처리
+   */
+  async handleRandomToggle() {
+    if (this.randomToggle instanceof HTMLInputElement) {
+      const isRandom = this.randomToggle.checked;
+      await this.backgroundManager.setRandomMode(isRandom);
+
+      if (!isRandom) {
+        alert('고정 모드로 변경되었습니다. 현재 표시된 이미지가 고정됩니다.');
+      } else {
+        alert('랜덤 모드로 변경되었습니다. 새 탭을 열 때마다 다른 이미지가 표시됩니다.');
+      }
+    }
   }
 }
 
@@ -690,6 +966,7 @@ class Application {
     this.searchManager = null;
     this.bookmarkManager = null;
     this.imageManager = null;
+    this.settingsManager = null;
   }
 
   /**
@@ -698,15 +975,20 @@ class Application {
   initialize() {
     // DOM 요소 가져오기
     const timeElement = document.getElementById('time');
-    const dateElement = document.getElementById('date');
+    const dateElement = document.getElementById('dateDisplay');
     const backgroundElement = document.getElementById('backgroundLayer');
     const searchForm = document.getElementById('searchForm');
     const searchInput = document.getElementById('searchInput');
     const bookmarksList = document.getElementById('bookmarksList');
+    const pinnedBookmarks = document.getElementById('pinnedBookmarks');
+    const bookmarksSidebar = document.getElementById('bookmarksSidebar');
+    const bookmarksToggle = document.getElementById('bookmarksToggle');
     const addBookmarkBtn = document.getElementById('addBookmarkBtn');
     const bookmarkModal = document.getElementById('addBookmarkModal');
-    const manageImagesBtn = document.getElementById('manageImagesBtn');
-    const imagesModal = document.getElementById('manageImagesModal');
+    const imagesSidebar = document.getElementById('imagesSidebar');
+    const imagesToggle = document.getElementById('imagesToggle');
+    const settingsModal = document.getElementById('settingsModal');
+    const settingsToggle = document.getElementById('settingsToggle');
 
     // 요소 검증
     if (
@@ -716,10 +998,15 @@ class Application {
       !(searchForm instanceof HTMLFormElement) ||
       !(searchInput instanceof HTMLInputElement) ||
       !bookmarksList ||
+      !pinnedBookmarks ||
+      !bookmarksSidebar ||
+      !bookmarksToggle ||
       !addBookmarkBtn ||
       !bookmarkModal ||
-      !manageImagesBtn ||
-      !imagesModal
+      !imagesSidebar ||
+      !imagesToggle ||
+      !settingsModal ||
+      !settingsToggle
     ) {
       console.error('Required DOM elements not found');
       return;
@@ -735,11 +1022,14 @@ class Application {
     this.searchManager = new SearchManager(searchForm, searchInput);
     this.searchManager.initialize();
 
-    this.bookmarkManager = new BookmarkManager(bookmarksList, addBookmarkBtn, bookmarkModal);
+    this.bookmarkManager = new BookmarkManager(bookmarksList, pinnedBookmarks, bookmarksSidebar, bookmarksToggle, addBookmarkBtn, bookmarkModal);
     this.bookmarkManager.initialize();
 
-    this.imageManager = new ImageManager(imagesModal, manageImagesBtn, this.backgroundManager);
+    this.imageManager = new ImageManager(imagesSidebar, imagesToggle, this.backgroundManager);
     this.imageManager.initialize();
+
+    this.settingsManager = new SettingsManager(settingsModal, settingsToggle, this.backgroundManager);
+    this.settingsManager.initialize();
   }
 }
 

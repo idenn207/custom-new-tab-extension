@@ -2,7 +2,7 @@
  * 파일 위치: /my-newtab-extension/newtab.css
  * 파일명: newtab.css
  * 용도: New Tab 페이지의 스타일 정의
- * 기능: 다크모드 기반 UI, 배경 이미지 적응형 색상, 반응형 레이아웃
+ * 기능: 다크모드 기반 UI, 배경 이미지 적응형 색상, collapse 즐겨찾기, 사이드바
  * 책임: 단일 책임 원칙에 따라 프레젠테이션 레이어만 담당
  */
 
@@ -24,7 +24,8 @@
   --hover-bg: rgba(255, 255, 255, 0.05);
 
   /* 레이아웃 */
-  --sidebar-width: 280px;
+  --icon-size: 44px;
+  --sidebar-width: 320px;
   --transition-speed: 0.3s;
 }
 
@@ -62,29 +63,152 @@ body {
   backdrop-filter: blur(3px);
 }
 
-/* ===== 즐겨찾기 사이드바 (왼쪽 상단) ===== */
-.bookmarks {
+/* ===== 아이콘 버튼 공통 스타일 ===== */
+.bookmarks-toggle,
+.images-toggle,
+.settings-toggle {
   position: fixed;
-  top: 30px;
-  left: 30px;
-  width: var(--sidebar-width);
-  max-height: calc(100vh - 60px);
+  width: var(--icon-size);
+  height: var(--icon-size);
   background: var(--bg-secondary);
-  border-radius: 16px;
-  padding: 24px;
-  backdrop-filter: blur(10px);
   border: 1px solid var(--border-color);
+  border-radius: 12px;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-speed);
+  backdrop-filter: blur(10px);
+  z-index: 100;
+}
+
+.bookmarks-toggle:hover,
+.images-toggle:hover,
+.settings-toggle:hover {
+  background: var(--hover-bg);
+  border-color: var(--accent-color);
+  transform: scale(1.05);
+}
+
+.bookmarks-toggle {
+  top: 24px;
+  left: 24px;
+}
+
+.images-toggle {
+  top: 24px;
+  right: 80px;
+}
+
+.settings-toggle {
+  top: 24px;
+  right: 24px;
+}
+
+/* ===== 고정된 즐겨찾기 (왼쪽 상단) ===== */
+.pinned-bookmarks {
+  position: fixed;
+  top: 84px;
+  left: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 99;
+}
+
+.pinned-bookmark-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  background: var(--bg-secondary);
+  border-radius: 10px;
+  text-decoration: none;
+  color: var(--text-secondary);
+  transition: all var(--transition-speed);
+  border: 1px solid transparent;
+  backdrop-filter: blur(10px);
+  width: 196px;
+}
+
+.pinned-bookmark-item:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+  border-color: var(--accent-color);
+  transform: translateX(4px);
+}
+
+.pinned-bookmark-item .bookmark-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.pinned-bookmark-item .bookmark-name {
+  flex: 1;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ===== 즐겨찾기 사이드바 ===== */
+.bookmarks-sidebar {
+  position: fixed;
+  top: 0;
+  left: -360px;
+  width: var(--sidebar-width);
+  height: 100vh;
+  background: var(--bg-secondary);
+  backdrop-filter: blur(10px);
+  border-right: 1px solid var(--border-color);
+  padding: 24px;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+  box-shadow: 4px 0 24px rgba(0, 0, 0, 0.3);
+  transition: left var(--transition-speed);
+  z-index: 200;
+  overflow-y: auto;
 }
 
-.bookmarks h2 {
-  font-size: 18px;
+.bookmarks-sidebar.active {
+  left: 0;
+}
+
+.bookmarks-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.bookmarks-header h2 {
+  font-size: 20px;
   font-weight: 600;
   color: var(--text-primary);
-  margin-bottom: 8px;
+}
+
+.add-bookmark-icon {
+  width: 36px;
+  height: 36px;
+  background: var(--accent-color);
+  border: none;
+  border-radius: 8px;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-speed);
+}
+
+.add-bookmark-icon:hover {
+  background: rgba(100, 150, 255, 1);
+  transform: scale(1.05);
 }
 
 .bookmarks-list {
@@ -93,31 +217,13 @@ body {
   gap: 8px;
   overflow-y: auto;
   flex: 1;
-  padding-right: 8px;
-}
-
-.bookmarks-list::-webkit-scrollbar {
-  width: 6px;
-}
-
-.bookmarks-list::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.bookmarks-list::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 3px;
-}
-
-.bookmarks-list::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
 }
 
 .bookmark-item {
   display: flex;
   align-items: center;
   gap: 12px;
-  padding: 12px 16px;
+  padding: 12px 14px;
   background: var(--bg-primary);
   border-radius: 10px;
   text-decoration: none;
@@ -131,7 +237,6 @@ body {
   background: var(--hover-bg);
   color: var(--text-primary);
   border-color: var(--accent-color);
-  transform: translateX(4px);
 }
 
 .bookmark-icon {
@@ -149,13 +254,24 @@ body {
   text-overflow: ellipsis;
 }
 
-.bookmark-delete {
+.bookmark-actions {
+  display: flex;
+  gap: 4px;
   opacity: 0;
-  background: rgba(255, 59, 48, 0.2);
+  transition: opacity var(--transition-speed);
+}
+
+.bookmark-item:hover .bookmark-actions {
+  opacity: 1;
+}
+
+.bookmark-pin,
+.bookmark-delete {
+  background: transparent;
   border: none;
-  color: #ff3b30;
-  width: 24px;
-  height: 24px;
+  color: var(--text-secondary);
+  width: 28px;
+  height: 28px;
   border-radius: 6px;
   cursor: pointer;
   transition: all var(--transition-speed);
@@ -165,55 +281,208 @@ body {
   justify-content: center;
 }
 
-.bookmark-item:hover .bookmark-delete {
+.bookmark-pin:hover {
+  background: rgba(100, 150, 255, 0.2);
+  color: var(--accent-color);
+}
+
+.bookmark-pin.pinned {
+  color: var(--accent-color);
   opacity: 1;
 }
 
 .bookmark-delete:hover {
-  background: rgba(255, 59, 48, 0.4);
+  background: rgba(255, 59, 48, 0.2);
+  color: #ff3b30;
 }
 
-.add-bookmark-btn {
-  width: 100%;
-  padding: 12px;
-  background: var(--accent-color);
-  color: white;
-  border: none;
-  border-radius: 10px;
-  font-size: 14px;
+/* ===== 이미지 관리 사이드바 ===== */
+.images-sidebar {
+  position: fixed;
+  top: 0;
+  right: -400px;
+  width: 360px;
+  height: 100vh;
+  background: var(--bg-secondary);
+  backdrop-filter: blur(10px);
+  border-left: 1px solid var(--border-color);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: -4px 0 24px rgba(0, 0, 0, 0.3);
+  transition: right var(--transition-speed);
+  z-index: 200;
+}
+
+.images-sidebar.active {
+  right: 0;
+}
+
+.images-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.images-header h2 {
+  font-size: 20px;
   font-weight: 600;
-  cursor: pointer;
-  transition: all var(--transition-speed);
+  color: var(--text-primary);
 }
 
-.add-bookmark-btn:hover {
-  background: rgba(100, 150, 255, 1);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(100, 150, 255, 0.4);
-}
-
-.manage-images-btn {
-  width: 100%;
-  padding: 12px;
-  background: var(--bg-primary);
-  color: var(--text-secondary);
+.close-sidebar {
+  width: 36px;
+  height: 36px;
+  background: transparent;
   border: 1px solid var(--border-color);
-  border-radius: 10px;
-  font-size: 14px;
-  font-weight: 600;
+  border-radius: 8px;
+  color: var(--text-secondary);
   cursor: pointer;
-  transition: all var(--transition-speed);
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
+  transition: all var(--transition-speed);
 }
 
-.manage-images-btn:hover {
+.close-sidebar:hover {
   background: var(--hover-bg);
   color: var(--text-primary);
   border-color: var(--accent-color);
-  transform: translateY(-2px);
+}
+
+.upload-area-compact {
+  border: 2px dashed var(--border-color);
+  border-radius: 12px;
+  padding: 20px;
+  text-align: center;
+  transition: all var(--transition-speed);
+  cursor: pointer;
+}
+
+.upload-area-compact:hover {
+  border-color: var(--accent-color);
+  background: var(--hover-bg);
+}
+
+.upload-label-compact {
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-secondary);
+}
+
+.upload-label-compact svg {
+  opacity: 0.6;
+}
+
+.upload-label-compact span {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.images-grid-sidebar {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.images-grid-sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.images-grid-sidebar::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.images-grid-sidebar::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 3px;
+}
+
+.image-item {
+  position: relative;
+  aspect-ratio: 16/9;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 2px solid transparent;
+  transition: all var(--transition-speed);
+  cursor: pointer;
+}
+
+.image-item:hover {
+  border-color: var(--accent-color);
+  transform: scale(1.03);
+}
+
+.image-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.image-delete {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 26px;
+  height: 26px;
+  background: rgba(255, 59, 48, 0.9);
+  border: none;
+  border-radius: 50%;
+  color: white;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  opacity: 0;
+  transition: all var(--transition-speed);
+  z-index: 10;
+}
+
+.image-item:hover .image-delete {
+  opacity: 1;
+}
+
+.image-delete:hover {
+  background: rgba(255, 59, 48, 1);
+  transform: scale(1.1);
+}
+
+.empty-images {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--text-secondary);
+  grid-column: 1 / -1;
+}
+
+.empty-images p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+/* ===== 날짜 표시 (우측 하단) ===== */
+.date-display {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  font-size: 16px;
+  font-weight: 400;
+  color: var(--text-secondary);
+  background: var(--bg-secondary);
+  backdrop-filter: blur(10px);
+  padding: 12px 20px;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  z-index: 10;
 }
 
 /* ===== 메인 컨텐츠 (중앙) ===== */
@@ -229,6 +498,7 @@ body {
   width: 100%;
   max-width: 700px;
   padding: 0 40px;
+  margin-top: -60px;
 }
 
 /* ===== 시계 ===== */
@@ -238,17 +508,12 @@ body {
 }
 
 .time {
-  font-size: 72px;
-  font-weight: 300;
-  letter-spacing: -2px;
-  margin-bottom: 8px;
+  font-family: 'Nanum Gothic', -apple-system, sans-serif;
+  font-size: 144px;
+  font-weight: 800;
+  letter-spacing: -4px;
   color: var(--text-primary);
-}
-
-.date {
-  font-size: 20px;
-  font-weight: 400;
-  color: var(--text-secondary);
+  line-height: 1;
 }
 
 /* ===== 검색바 ===== */
@@ -337,29 +602,6 @@ body {
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
 }
 
-.modal-large {
-  max-width: 800px;
-  max-height: 80vh;
-  overflow-y: auto;
-}
-
-.modal-large::-webkit-scrollbar {
-  width: 8px;
-}
-
-.modal-large::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.modal-large::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 4px;
-}
-
-.modal-large::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
-
 .modal-content h3 {
   margin-bottom: 24px;
   font-size: 22px;
@@ -428,23 +670,143 @@ body {
   color: var(--text-primary);
 }
 
+/* ===== 설정 섹션 ===== */
+.settings-section {
+  margin: 20px 0;
+}
+
+.setting-item {
+  margin-bottom: 20px;
+}
+
+.setting-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  cursor: pointer;
+}
+
+.setting-label span {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-primary);
+}
+
+.setting-description {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-top: 8px;
+  line-height: 1.4;
+}
+
+/* ===== 토글 스위치 ===== */
+.toggle-container {
+  position: relative;
+}
+
+.toggle-input {
+  display: none;
+}
+
+.toggle-label {
+  display: block;
+  width: 80px;
+  height: 36px;
+  background: var(--bg-primary);
+  border: 2px solid var(--border-color);
+  border-radius: 18px;
+  cursor: pointer;
+  position: relative;
+  transition: all var(--transition-speed);
+}
+
+.toggle-label::before {
+  content: '';
+  position: absolute;
+  width: 28px;
+  height: 28px;
+  background: white;
+  border-radius: 50%;
+  top: 2px;
+  left: 2px;
+  transition: all var(--transition-speed);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.toggle-input:checked + .toggle-label {
+  background: var(--accent-color);
+  border-color: var(--accent-color);
+}
+
+.toggle-input:checked + .toggle-label::before {
+  left: 46px;
+}
+
+.toggle-text {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  transition: all var(--transition-speed);
+}
+
+.toggle-input:not(:checked) + .toggle-label .toggle-text::before {
+  content: attr(data-off);
+  position: absolute;
+  right: 8px;
+}
+
+.toggle-input:checked + .toggle-label .toggle-text::before {
+  content: attr(data-on);
+  position: absolute;
+  left: 8px;
+  color: white;
+}
+
 /* ===== 반응형 디자인 ===== */
 @media (max-width: 1024px) {
-  .bookmarks {
-    width: 240px;
-  }
-
   .time {
-    font-size: 56px;
+    font-size: 108px;
   }
 }
 
 @media (max-width: 768px) {
-  .bookmarks {
-    top: 20px;
-    left: 20px;
-    width: 200px;
-    padding: 16px;
+  .bookmarks-toggle,
+  .images-toggle,
+  .settings-toggle {
+    width: 40px;
+    height: 40px;
+  }
+
+  .bookmarks-toggle {
+    top: 16px;
+    left: 16px;
+  }
+
+  .images-toggle {
+    top: 16px;
+    right: 68px;
+  }
+
+  .settings-toggle {
+    top: 16px;
+    right: 16px;
+  }
+
+  .pinned-bookmarks {
+    top: 68px;
+    left: 16px;
+  }
+
+  .pinned-bookmark-item {
+    width: 160px;
+    padding: 8px 12px;
   }
 
   .main-content {
@@ -453,179 +815,23 @@ body {
   }
 
   .time {
-    font-size: 48px;
-  }
-
-  .date {
-    font-size: 16px;
+    font-size: 80px;
   }
 
   .search-input {
     padding: 14px 20px;
     font-size: 14px;
   }
-}
 
-/* ===== 이미지 업로드 및 관리 ===== */
-.upload-area {
-  margin: 24px 0;
-  border: 2px dashed var(--border-color);
-  border-radius: 12px;
-  padding: 40px;
-  text-align: center;
-  transition: all var(--transition-speed);
-  cursor: pointer;
-}
-
-.upload-area:hover {
-  border-color: var(--accent-color);
-  background: var(--hover-bg);
-}
-
-.upload-area.dragover {
-  border-color: var(--accent-color);
-  background: var(--hover-bg);
-  transform: scale(1.02);
-}
-
-.upload-label {
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  color: var(--text-secondary);
-}
-
-.upload-label svg {
-  opacity: 0.5;
-}
-
-.upload-label p {
-  font-size: 16px;
-  font-weight: 500;
-  color: var(--text-primary);
-  margin: 0;
-}
-
-.upload-label span {
-  font-size: 13px;
-  opacity: 0.7;
-}
-
-.images-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 16px;
-  margin: 24px 0;
-  max-height: 400px;
-  overflow-y: auto;
-  padding: 4px;
-}
-
-.images-grid::-webkit-scrollbar {
-  width: 8px;
-}
-
-.images-grid::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-.images-grid::-webkit-scrollbar-thumb {
-  background: var(--border-color);
-  border-radius: 4px;
-}
-
-.image-item {
-  position: relative;
-  aspect-ratio: 16/9;
-  border-radius: 10px;
-  overflow: hidden;
-  border: 2px solid transparent;
-  transition: all var(--transition-speed);
-  cursor: pointer;
-}
-
-.image-item:hover {
-  border-color: var(--accent-color);
-  transform: scale(1.05);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
-}
-
-.image-item img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.image-delete {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 28px;
-  height: 28px;
-  background: rgba(255, 59, 48, 0.9);
-  border: none;
-  border-radius: 50%;
-  color: white;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 18px;
-  opacity: 0;
-  transition: all var(--transition-speed);
-  z-index: 10;
-}
-
-.image-item:hover .image-delete {
-  opacity: 1;
-}
-
-.image-delete:hover {
-  background: rgba(255, 59, 48, 1);
-  transform: scale(1.1);
-}
-
-.image-info {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: linear-gradient(to top, rgba(0, 0, 0, 0.8), transparent);
-  padding: 8px;
-  opacity: 0;
-  transition: all var(--transition-speed);
-}
-
-.image-item:hover .image-info {
-  opacity: 1;
-}
-
-.image-size {
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.8);
-  text-align: center;
-}
-
-.empty-images {
-  text-align: center;
-  padding: 40px 20px;
-  color: var(--text-secondary);
-}
-
-.empty-images p {
-  margin: 0;
-  font-size: 14px;
-}
-
-@media (max-width: 768px) {
-  .images-grid {
-    grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
-    gap: 12px;
+  .date-display {
+    bottom: 16px;
+    right: 16px;
+    font-size: 14px;
+    padding: 10px 16px;
   }
 
-  .upload-area {
-    padding: 24px;
+  .bookmarks-sidebar,
+  .images-sidebar {
+    width: 280px;
   }
 }
