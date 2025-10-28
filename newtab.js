@@ -1283,10 +1283,8 @@ class SettingsManager {
       this.updatePositionGrids();
       this.updatePositionSettingsVisibility();
 
-      // 초기 로드 시 겹침 확인 (렌더링 완료 후)
-      setTimeout(() => {
-        this.checkOverlap();
-      }, 100);
+      // 초기 로드 시 즉시 오프셋 적용
+      this.applyInitialOverlap(clockEnabled, searchEnabled);
     } catch (error) {
       console.error('Failed to load widget settings:', error);
     }
@@ -1337,8 +1335,12 @@ class SettingsManager {
       const clockEnabled = this.clockToggle.checked;
       await this.saveClockSetting(clockEnabled);
       this.applyClockSetting(clockEnabled);
-      this.checkOverlap();
       this.updatePositionSettingsVisibility();
+
+      // requestAnimationFrame으로 렌더링 후 겹침 확인
+      requestAnimationFrame(() => {
+        this.checkOverlap();
+      });
     }
   }
 
@@ -1351,8 +1353,12 @@ class SettingsManager {
       const searchEnabled = this.searchToggle.checked;
       await this.saveSearchSetting(searchEnabled);
       this.applySearchSetting(searchEnabled);
-      this.checkOverlap();
       this.updatePositionSettingsVisibility();
+
+      // requestAnimationFrame으로 렌더링 후 겹침 확인
+      requestAnimationFrame(() => {
+        this.checkOverlap();
+      });
     }
   }
 
@@ -1499,10 +1505,12 @@ class SettingsManager {
     this.applyClockPosition(position);
     this.updatePositionGrids();
 
-    // 약간의 지연 후 겹침 확인 (렌더링 완료 대기)
-    setTimeout(() => {
-      this.checkOverlap();
-    }, 50);
+    // requestAnimationFrame으로 렌더링 후 겹침 확인
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        this.checkOverlap();
+      });
+    });
   }
 
   /**
@@ -1516,10 +1524,12 @@ class SettingsManager {
     this.applySearchPosition(position);
     this.updatePositionGrids();
 
-    // 약간의 지연 후 겹침 확인 (렌더링 완료 대기)
-    setTimeout(() => {
-      this.checkOverlap();
-    }, 50);
+    // requestAnimationFrame으로 렌더링 후 겹침 확인
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        this.checkOverlap();
+      });
+    });
   }
 
   /**
@@ -1617,7 +1627,7 @@ class SettingsManager {
   /**
    * 겹침 확인 및 조정
    */
-  checkOverlap() {
+  async checkOverlap() {
     if (!this.clockElement || !this.searchElement) return;
 
     const clockEnabled = this.clockToggle instanceof HTMLInputElement ? this.clockToggle.checked : true;
@@ -1655,8 +1665,8 @@ class SettingsManager {
       this.clockElement.classList.add('overlap-offset');
       this.searchElement.classList.add('overlap-offset');
 
-      // 시계 너비를 계산하여 검색창 너비 설정
-      this.matchSearchWidthToClock();
+      // 시계 너비를 계산하여 검색창 너비 설정 및 저장
+      await this.matchSearchWidthToClock();
 
       // 왼쪽/오른쪽 정렬 적용
       this.applyAlignment();
@@ -1671,7 +1681,7 @@ class SettingsManager {
   /**
    * 검색창 너비를 시계 너비에 맞춤
    */
-  matchSearchWidthToClock() {
+  async matchSearchWidthToClock() {
     if (!this.clockElement || !this.searchElement) return;
 
     // 시계의 실제 너비 계산
@@ -1681,6 +1691,35 @@ class SettingsManager {
       // 검색창의 패딩을 고려하여 너비 설정
       this.searchElement.style.width = `${clockWidth}px`;
       this.searchElement.style.maxWidth = `${clockWidth}px`;
+
+      // 계산된 너비 저장
+      await this.saveSearchWidth(clockWidth);
+    }
+  }
+
+  /**
+   * 검색창 너비 저장
+   * @param {number} width
+   */
+  async saveSearchWidth(width) {
+    try {
+      await chrome.storage.local.set({ searchWidth: width });
+    } catch (error) {
+      console.error('Failed to save search width:', error);
+    }
+  }
+
+  /**
+   * 검색창 너비 불러오기
+   * @returns {Promise<number|null>}
+   */
+  async loadSearchWidth() {
+    try {
+      const result = await chrome.storage.local.get(['searchWidth']);
+      return result.searchWidth || null;
+    } catch (error) {
+      console.error('Failed to load search width:', error);
+      return null;
     }
   }
 
@@ -1703,6 +1742,48 @@ class SettingsManager {
     // 중앙은 기본값
     else {
       this.searchElement.style.textAlign = '';
+    }
+  }
+
+  /**
+   * 초기 로드 시 오프셋 즉시 적용 (깜빡임 방지)
+   * @param {boolean} clockEnabled
+   * @param {boolean} searchEnabled
+   */
+  async applyInitialOverlap(clockEnabled, searchEnabled) {
+    if (!this.clockElement || !this.searchElement) return;
+
+    // 둘 다 비활성화면 오프셋 제거
+    if (!clockEnabled || !searchEnabled) {
+      return;
+    }
+
+    // 같은 위치인지 확인
+    const isSamePosition = this.clockPosition === this.searchPosition;
+
+    if (isSamePosition) {
+      // 즉시 오프셋 클래스 적용
+      this.clockElement.classList.add('overlap-offset');
+      this.searchElement.classList.add('overlap-offset');
+
+      // 정렬 적용
+      this.applyAlignment();
+
+      // 저장된 너비 불러오기
+      const savedWidth = await this.loadSearchWidth();
+
+      if (savedWidth) {
+        // 저장된 너비가 있으면 즉시 적용
+        this.searchElement.style.width = `${savedWidth}px`;
+        this.searchElement.style.maxWidth = `${savedWidth}px`;
+      }
+
+      // requestAnimationFrame으로 렌더링 후 실제 너비 재계산 및 저장
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          this.matchSearchWidthToClock();
+        });
+      });
     }
   }
 
