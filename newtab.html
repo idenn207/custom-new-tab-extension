@@ -1,0 +1,103 @@
+<!-- 
+  파일 위치: /my-newtab-extension/newtab.html
+  파일명: newtab.html
+  용도: Chrome New Tab 페이지의 HTML 구조
+  기능: 시계, 검색바, 즐겨찾기 링크 UI 제공
+  책임: 사용자 인터페이스의 DOM 구조 정의
+-->
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>New Tab</title>
+  <link rel="stylesheet" href="newtab.css">
+</head>
+
+<body>
+  <!-- 배경 레이어 -->
+  <div class="background-layer" id="backgroundLayer"></div>
+  <div class="overlay"></div>
+
+  <!-- 즐겨찾기 링크 (왼쪽 상단) -->
+  <aside class="bookmarks" id="bookmarks">
+    <h2>즐겨찾기</h2>
+    <nav class="bookmarks-list" id="bookmarksList">
+      <!-- JavaScript로 동적 생성 -->
+    </nav>
+    <button class="add-bookmark-btn" id="addBookmarkBtn">+ 즐겨찾기 추가</button>
+    <button class="manage-images-btn" id="manageImagesBtn">🖼️ 이미지 관리</button>
+  </aside>
+
+  <!-- 메인 컨텐츠 (중앙) -->
+  <main class="main-content">
+    <!-- 시계 -->
+    <div class="clock" id="clock">
+      <div class="time" id="time">00:00:00</div>
+      <div class="date" id="date">0000년 0월 0일</div>
+    </div>
+
+    <!-- 검색바 -->
+    <div class="search-container">
+      <form class="search-form" id="searchForm">
+        <input type="text" class="search-input" id="searchInput" placeholder="Google 검색 또는 URL 입력" autocomplete="off">
+        <button type="submit" class="search-btn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"></circle>
+            <path d="m21 21-4.35-4.35"></path>
+          </svg>
+        </button>
+      </form>
+    </div>
+  </main>
+
+  <!-- 북마크 추가 모달 -->
+  <div class="modal" id="addBookmarkModal">
+    <div class="modal-content">
+      <h3>즐겨찾기 추가</h3>
+      <form id="bookmarkForm">
+        <input type="text" id="bookmarkName" placeholder="이름" required>
+        <input type="url" id="bookmarkUrl" placeholder="URL (https://...)" required>
+        <div class="modal-buttons">
+          <button type="submit" class="btn-primary">추가</button>
+          <button type="button" class="btn-secondary" id="cancelBtn">취소</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 이미지 관리 모달 -->
+  <div class="modal" id="manageImagesModal">
+    <div class="modal-content modal-large">
+      <h3>배경 이미지 관리</h3>
+
+      <!-- 이미지 업로드 영역 -->
+      <div class="upload-area" id="uploadArea">
+        <input type="file" id="imageUpload" accept="image/*" multiple hidden>
+        <label for="imageUpload" class="upload-label">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="17 8 12 3 7 8"></polyline>
+            <line x1="12" y1="3" x2="12" y2="15"></line>
+          </svg>
+          <p>클릭하거나 이미지를 드래그하여 업로드</p>
+          <span>JPG, PNG, WEBP (최대 5MB)</span>
+        </label>
+      </div>
+
+      <!-- 업로드된 이미지 목록 -->
+      <div class="images-grid" id="imagesGrid">
+        <!-- JavaScript로 동적 생성 -->
+      </div>
+
+      <div class="modal-buttons">
+        <button type="button" class="btn-secondary" id="closeImagesBtn">닫기</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="newtab.js"></script>
+</body>
+
+</html>
