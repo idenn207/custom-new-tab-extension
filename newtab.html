@@ -38,7 +38,7 @@
   <!-- 즐겨찾기 사이드바 -->
   <aside class="bookmarks-sidebar" id="bookmarksSidebar">
     <div class="bookmarks-header">
-      <h2>빠른이동</h2>
+      <h2>즐겨찾기</h2>
       <button class="add-bookmark-icon" id="addBookmarkBtn" title="즐겨찾기 추가">
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <line x1="12" y1="5" x2="12" y2="19"></line>
@@ -93,83 +93,86 @@
 
   <!-- 설정 아이콘 (우측 상단) -->
   <button class="settings-toggle" id="settingsToggle" title="설정">
-    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+      stroke-linecap="round" stroke-linejoin="round">
       <circle cx="12" cy="12" r="3"></circle>
-      <path d="M12 1v6m0 6v6"></path>
-      <path d="M4.22 4.22l4.24 4.24m5.08 5.08l4.24 4.24"></path>
-      <path d="M1 12h6m6 0h6"></path>
-      <path d="M4.22 19.78l4.24-4.24m5.08-5.08l4.24-4.24"></path>
+      <path
+        d="M12 1v3m0 16v3M4.22 4.22l2.12 2.12m11.32 11.32l2.12 2.12M1 12h3m16 0h3M4.22 19.78l2.12-2.12m11.32-11.32l2.12-2.12">
+      </path>
     </svg>
   </button>
 
   <!-- 설정 모달 -->
   <div class="modal" id="settingsModal">
     <div class="modal-content modal-settings">
-      <div class="settings-sidebar">
-        <h3>설정</h3>
-        <nav class="settings-menu">
-          <button class="settings-menu-item active" data-section="image">이미지</button>
-          <button class="settings-menu-item" data-section="background">배경</button>
-          <button class="settings-menu-item" data-section="overlay">오버레이</button>
-        </nav>
+      <!-- 헤더 -->
+      <div class="modal-header">
+        <h2>설정</h2>
+        <button class="settings-close" id="settingsClose">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="18" y1="6" x2="6" y2="18"></line>
+            <line x1="6" y1="6" x2="18" y2="18"></line>
+          </svg>
+        </button>
       </div>
 
-      <div class="settings-content">
-        <!-- 이미지 설정 -->
-        <div class="settings-section active" id="settingsImage">
-          <div class="settings-group">
-            <label class="settings-label">배경 이미지 모드</label>
-            <div class="settings-control">
-              <div class="toggle-container">
-                <input type="checkbox" id="randomImageToggle" class="toggle-input">
-                <label for="randomImageToggle" class="toggle-label">
-                  <span class="toggle-text" data-on="랜덤" data-off="고정"></span>
-                </label>
-              </div>
-              <p class="setting-description">고정 모드: 한 번 선택된 이미지가 계속 표시됩니다</p>
-            </div>
-          </div>
+      <div class="modal-body">
+        <!-- 왼쪽 사이드바 메뉴 -->
+        <div class="settings-sidebar">
+          <nav class="settings-menu">
+            <button class="settings-menu-item active" data-section="background">배경</button>
+          </nav>
         </div>
 
-        <!-- 배경 설정 -->
-        <div class="settings-section" id="settingsBackground">
-          <div class="settings-group">
-            <label class="settings-label">배경 효과</label>
-            <div class="settings-control">
-              <p class="setting-description">배경 이미지 관련 설정</p>
-            </div>
-          </div>
-        </div>
+        <!-- 오른쪽 컨텐츠 -->
+        <div class="settings-content">
+          <!-- 배경 설정 -->
+          <div class="settings-section active" id="settingsBackground">
+            <!-- 이미지 섹션 -->
+            <div class="settings-subsection">
+              <h3 class="settings-section-title">이미지</h3>
 
-        <!-- 오버레이 설정 -->
-        <div class="settings-section" id="settingsOverlay">
-          <div class="settings-group">
-            <label class="settings-label">블러 효과</label>
-            <div class="settings-control">
-              <div class="toggle-container">
-                <input type="checkbox" id="blurToggle" class="toggle-input">
-                <label for="blurToggle" class="toggle-label">
-                  <span class="toggle-text" data-on="ON" data-off="OFF"></span>
-                </label>
+              <div class="settings-item">
+                <label class="settings-item-label">배경 이미지 모드</label>
+                <div class="toggle-container-inline">
+                  <input type="checkbox" id="randomImageToggle" class="toggle-input-small">
+                  <label for="randomImageToggle" class="toggle-label-small">
+                    <span class="toggle-text-small" data-on="랜덤" data-off="고정"></span>
+                  </label>
+                </div>
               </div>
-              <p class="setting-description">오버레이 블러 효과를 켜거나 끕니다</p>
+              <p class="settings-item-description">고정 모드: 한 번 선택된 이미지가 계속 표시됩니다</p>
             </div>
-          </div>
 
-          <div class="settings-group">
-            <label class="settings-label">오버레이 투명도</label>
-            <div class="settings-control">
-              <div class="slider-container">
-                <input type="range" id="opacitySlider" class="slider" min="0" max="100" value="50">
-                <div class="slider-value"><span id="opacityValue">50</span>%</div>
+            <div class="settings-divider"></div>
+
+            <!-- 오버레이 섹션 -->
+            <div class="settings-subsection">
+              <h3 class="settings-section-title">오버레이</h3>
+
+              <div class="settings-item">
+                <label class="settings-item-label">블러 효과</label>
+                <div class="toggle-container-inline">
+                  <input type="checkbox" id="blurToggle" class="toggle-input-small">
+                  <label for="blurToggle" class="toggle-label-small">
+                    <span class="toggle-text-small" data-on="ON" data-off="OFF"></span>
+                  </label>
+                </div>
               </div>
-              <p class="setting-description">오버레이 어두운 정도를 조절합니다 (0: 투명, 100: 불투명)</p>
-            </div>
-          </div>
-        </div>
+              <p class="settings-item-description">오버레이 블러 효과를 켜거나 끕니다</p>
 
-        <div class="modal-buttons">
-          <button type="button" class="btn-secondary" id="closeSettingsBtn">닫기</button>
+              <div class="settings-item">
+                <label class="settings-item-label">오버레이 밝기</label>
+                <div class="slider-value-inline"><span id="opacityValue">80</span>%</div>
+              </div>
+              <div class="slider-container-full">
+                <input type="range" id="opacitySlider" class="slider" min="0" max="100" value="80">
+              </div>
+              <p class="settings-item-description">오버레이 밝기를 조절합니다 (0: 어두움, 100: 밝음)</p>
+            </div>
+
+            <div class="settings-divider"></div>
+          </div>
         </div>
       </div>
     </div>
