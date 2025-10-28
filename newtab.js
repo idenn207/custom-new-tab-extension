@@ -419,7 +419,7 @@ class BookmarkManager {
     const item = document.createElement('a');
     item.className = 'bookmark-item';
     item.href = bookmark.url;
-    item.target = '_blank';
+    item.target = '_self';
 
     const icon = document.createElement('img');
     icon.className = 'bookmark-icon';
@@ -442,12 +442,14 @@ class BookmarkManager {
 
     // 고정된 경우: 채워진 핀, 해제된 경우: 빈 핀
     if (bookmark.pinned) {
-      pinBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2">
-        <path d="M9 9V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v4m-6 0h6m-6 0L7 19l5 2 5-2-2-10"/>
+      // 채워진 핀 (고정됨)
+      pinBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" stroke="none">
+        <path d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z"/>
       </svg>`;
     } else {
-      pinBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-        <path d="M9 9V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v4m-6 0h6m-6 0L7 19l5 2 5-2-2-10"/>
+      // 빈 핀 (고정 안됨)
+      pinBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M16 9V4h1c.55 0 1-.45 1-1s-.45-1-1-1H7c-.55 0-1 .45-1 1s.45 1 1 1h1v5c0 1.66-1.34 3-3 3v2h5.97v7l1 1 1-1v-7H19v-2c-1.66 0-3-1.34-3-3z"/>
       </svg>`;
     }
 
@@ -485,7 +487,7 @@ class BookmarkManager {
     const item = document.createElement('a');
     item.className = 'pinned-bookmark-item';
     item.href = bookmark.url;
-    item.target = '_blank';
+    item.target = '_self';
 
     const icon = document.createElement('img');
     icon.className = 'bookmark-icon';
@@ -870,7 +872,7 @@ class ImageManager {
 
 /**
  * 설정 관리 클래스
- * 책임: 설정 UI 및 설정 저장/로드 (메뉴바, blur, overlay opacity)
+ * 책임: 설정 UI 및 설정 저장/로드 (blur, overlay opacity)
  */
 class SettingsManager {
   /**
@@ -886,7 +888,6 @@ class SettingsManager {
     this.blurToggle = null;
     this.opacitySlider = null;
     this.overlayElement = null;
-    this.currentSection = 'image';
   }
 
   /**
@@ -914,8 +915,8 @@ class SettingsManager {
     // 토글 버튼
     this.toggleBtn.addEventListener('click', () => this.openModal());
 
-    // 닫기 버튼
-    const closeBtn = document.getElementById('closeSettingsBtn');
+    // X 닫기 버튼
+    const closeBtn = document.getElementById('settingsClose');
     if (closeBtn) {
       closeBtn.addEventListener('click', () => this.closeModal());
     }
@@ -973,8 +974,6 @@ class SettingsManager {
    * @param {string} section - 섹션 이름
    */
   switchSection(section) {
-    this.currentSection = section;
-
     // 메뉴 아이템 활성화
     const menuItems = document.querySelectorAll('.settings-menu-item');
     menuItems.forEach((item) => {
@@ -1023,26 +1022,26 @@ class SettingsManager {
 
     // 블러 설정
     try {
-      const result = await chrome.storage.local.get(['blurEnabled', 'overlayOpacity']);
+      const result = await chrome.storage.local.get(['blurEnabled', 'overlayBrightness']);
 
       const blurEnabled = result.blurEnabled !== false; // 기본값 true
-      const overlayOpacity = result.overlayOpacity !== undefined ? result.overlayOpacity : 50;
+      const overlayBrightness = result.overlayBrightness !== undefined ? result.overlayBrightness : 50;
 
       if (this.blurToggle instanceof HTMLInputElement) {
         this.blurToggle.checked = blurEnabled;
       }
 
       if (this.opacitySlider instanceof HTMLInputElement) {
-        this.opacitySlider.value = String(overlayOpacity);
+        this.opacitySlider.value = String(overlayBrightness);
         const valueDisplay = document.getElementById('opacityValue');
         if (valueDisplay) {
-          valueDisplay.textContent = String(overlayOpacity);
+          valueDisplay.textContent = String(overlayBrightness);
         }
       }
 
       // 설정 적용
       this.applyBlurSetting(blurEnabled);
-      this.applyOpacitySetting(overlayOpacity);
+      this.applyBrightnessSetting(overlayBrightness);
     } catch (error) {
       console.error('Failed to load overlay settings:', error);
     }
@@ -1055,12 +1054,6 @@ class SettingsManager {
     if (this.randomToggle instanceof HTMLInputElement) {
       const isRandom = this.randomToggle.checked;
       await this.backgroundManager.setRandomMode(isRandom);
-
-      if (!isRandom) {
-        alert('고정 모드로 변경되었습니다. 현재 표시된 이미지가 고정됩니다.');
-      } else {
-        alert('랜덤 모드로 변경되었습니다. 새 탭을 열 때마다 다른 이미지가 표시됩니다.');
-      }
     }
   }
 
@@ -1080,9 +1073,9 @@ class SettingsManager {
    */
   async handleOpacityChange() {
     if (this.opacitySlider instanceof HTMLInputElement) {
-      const opacity = parseInt(this.opacitySlider.value);
-      await this.saveOpacitySetting(opacity);
-      this.applyOpacitySetting(opacity);
+      const brightness = parseInt(this.opacitySlider.value);
+      await this.saveBrightnessSetting(brightness);
+      this.applyBrightnessSetting(brightness);
     }
   }
 
@@ -1101,12 +1094,14 @@ class SettingsManager {
   }
 
   /**
-   * 투명도 설정 적용
-   * @param {number} opacity - 0-100
+   * 밝기 설정 적용 (100%에 가까울수록 밝아짐)
+   * @param {number} brightness - 0-100
    */
-  applyOpacitySetting(opacity) {
+  applyBrightnessSetting(brightness) {
     if (this.overlayElement) {
-      // 0-100을 0.0-0.6으로 매핑 (최대 60% 불투명도)
+      // 100%에 가까울수록 밝아지도록 반전
+      // 0 = 가장 어두움 (0.6), 100 = 가장 밝음 (0.0)
+      const opacity = 100 - brightness;
       const alpha1 = (opacity / 100) * 0.4;
       const alpha2 = (opacity / 100) * 0.6;
 
@@ -1131,14 +1126,14 @@ class SettingsManager {
   }
 
   /**
-   * 투명도 설정 저장
-   * @param {number} opacity
+   * 밝기 설정 저장
+   * @param {number} brightness
    */
-  async saveOpacitySetting(opacity) {
+  async saveBrightnessSetting(brightness) {
     try {
-      await chrome.storage.local.set({ overlayOpacity: opacity });
+      await chrome.storage.local.set({ overlayBrightness: brightness });
     } catch (error) {
-      console.error('Failed to save opacity setting:', error);
+      console.error('Failed to save brightness setting:', error);
     }
   }
 }
