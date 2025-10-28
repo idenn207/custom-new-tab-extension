@@ -656,7 +656,7 @@ body {
   top: 120px;
   left: 280px;
   transform: translate(0, 0);
-  max-width: 400px;
+  max-width: 450px;
 }
 .search-container.position-top-center {
   top: 120px;
@@ -667,13 +667,13 @@ body {
   top: 120px;
   left: calc(100% - 40px);
   transform: translate(-100%, 0);
-  max-width: 400px;
+  max-width: 450px;
 }
 .search-container.position-center-left {
   top: 50%;
   left: 280px;
   transform: translate(0, -50%);
-  max-width: 400px;
+  max-width: 450px;
 }
 .search-container.position-center-center {
   top: 50%;
@@ -684,13 +684,13 @@ body {
   top: 50%;
   left: calc(100% - 40px);
   transform: translate(-100%, -50%);
-  max-width: 400px;
+  max-width: 450px;
 }
 .search-container.position-bottom-left {
   top: calc(100% - 120px);
   left: 280px;
   transform: translate(0, -100%);
-  max-width: 400px;
+  max-width: 450px;
 }
 .search-container.position-bottom-center {
   top: calc(100% - 120px);
@@ -701,7 +701,7 @@ body {
   top: calc(100% - 120px);
   left: calc(100% - 40px);
   transform: translate(-100%, -100%);
-  max-width: 400px;
+  max-width: 450px;
 }
 
 /* 겹침 시 검색창 오프셋 - 아래로 이동 */
@@ -754,6 +754,19 @@ body {
   position: relative;
   width: 100%;
 }
+.search-form {
+  position: relative;
+  width: 100%;
+}
+
+/* 검색창 내부 요소 정렬 */
+.search-container[style*='text-align: left'] .search-form {
+  text-align: left;
+}
+
+.search-container[style*='text-align: right'] .search-form {
+  text-align: right;
+}
 
 .search-input {
   width: 100%;
@@ -767,6 +780,7 @@ body {
   outline: none;
   transition: all var(--transition-speed);
   backdrop-filter: blur(10px);
+  text-align: left;
 }
 
 .search-input::placeholder {
