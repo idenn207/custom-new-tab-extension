@@ -1249,6 +1249,7 @@ class SettingsManager {
    */
   async handleClockToggle() {
     if (this.clockToggle instanceof HTMLInputElement) {
+      this.enableTransitions();
       const clockEnabled = this.clockToggle.checked;
       await this.saveClockSetting(clockEnabled);
       this.applyClockSetting(clockEnabled);
@@ -1262,6 +1263,7 @@ class SettingsManager {
    */
   async handleSearchToggle() {
     if (this.searchToggle instanceof HTMLInputElement) {
+      this.enableTransitions();
       const searchEnabled = this.searchToggle.checked;
       await this.saveSearchSetting(searchEnabled);
       this.applySearchSetting(searchEnabled);
@@ -1407,6 +1409,7 @@ class SettingsManager {
    * @param {string} position
    */
   async handleClockPositionChange(position) {
+    this.enableTransitions();
     this.clockPosition = position;
     await this.savePositionSettings();
     this.applyClockPosition(position);
@@ -1419,6 +1422,7 @@ class SettingsManager {
    * @param {string} position
    */
   async handleSearchPositionChange(position) {
+    this.enableTransitions();
     this.searchPosition = position;
     await this.savePositionSettings();
     this.applySearchPosition(position);
@@ -1438,8 +1442,17 @@ class SettingsManager {
       this.clockElement.style.left = '';
       this.clockElement.style.right = '';
 
+      // transition 클래스 유지 여부 확인
+      const hasTransition = this.clockElement.classList.contains('enable-transition');
+
       // 모든 위치 클래스 제거
       this.clockElement.className = 'clock';
+
+      // transition 클래스 복원
+      if (hasTransition) {
+        this.clockElement.classList.add('enable-transition');
+      }
+
       // 새 위치 클래스 추가
       this.clockElement.classList.add(`position-${position}`);
     }
@@ -1457,8 +1470,17 @@ class SettingsManager {
       this.searchElement.style.left = '';
       this.searchElement.style.right = '';
 
+      // transition 클래스 유지 여부 확인
+      const hasTransition = this.searchElement.classList.contains('enable-transition');
+
       // 모든 위치 클래스 제거
       this.searchElement.className = 'search-container';
+
+      // transition 클래스 복원
+      if (hasTransition) {
+        this.searchElement.classList.add('enable-transition');
+      }
+
       // 새 위치 클래스 추가
       this.searchElement.classList.add(`position-${position}`);
     }
@@ -1608,6 +1630,19 @@ class SettingsManager {
       });
     } catch (error) {
       console.error('Failed to save position settings:', error);
+    }
+  }
+
+  /**
+   * 애니메이션 활성화
+   */
+  enableTransitions() {
+    // 애니메이션 클래스가 없으면 추가
+    if (this.clockElement && !this.clockElement.classList.contains('enable-transition')) {
+      this.clockElement.classList.add('enable-transition');
+    }
+    if (this.searchElement && !this.searchElement.classList.contains('enable-transition')) {
+      this.searchElement.classList.add('enable-transition');
     }
   }
 }
