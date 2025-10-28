@@ -885,9 +885,11 @@ class SettingsManager {
     this.toggleBtn = toggleBtn;
     this.backgroundManager = backgroundManager;
     this.randomToggle = null;
+    this.clockToggle = null;
     this.blurToggle = null;
     this.opacitySlider = null;
     this.overlayElement = null;
+    this.clockElement = null;
   }
 
   /**
@@ -895,11 +897,13 @@ class SettingsManager {
    */
   initialize() {
     this.randomToggle = document.getElementById('randomImageToggle');
+    this.clockToggle = document.getElementById('clockToggle');
     this.blurToggle = document.getElementById('blurToggle');
     this.opacitySlider = document.getElementById('opacitySlider');
     this.overlayElement = document.querySelector('.overlay');
+    this.clockElement = document.getElementById('clock');
 
-    if (!this.randomToggle || !this.blurToggle || !this.opacitySlider || !this.overlayElement) {
+    if (!this.randomToggle || !this.clockToggle || !this.blurToggle || !this.opacitySlider || !this.overlayElement || !this.clockElement) {
       console.error('Settings elements not found');
       return;
     }
@@ -945,6 +949,11 @@ class SettingsManager {
     // 랜덤 이미지 토글
     if (this.randomToggle instanceof HTMLInputElement) {
       this.randomToggle.addEventListener('change', () => this.handleRandomToggle());
+    }
+
+    // 시계 토글
+    if (this.clockToggle instanceof HTMLInputElement) {
+      this.clockToggle.addEventListener('change', () => this.handleClockToggle());
     }
 
     // 블러 토글
@@ -1020,6 +1029,20 @@ class SettingsManager {
       this.randomToggle.checked = this.backgroundManager.isRandomMode;
     }
 
+    // 시계 표시 설정
+    try {
+      const result = await chrome.storage.local.get(['clockEnabled']);
+      const clockEnabled = result.clockEnabled !== false; // 기본값 true
+
+      if (this.clockToggle instanceof HTMLInputElement) {
+        this.clockToggle.checked = clockEnabled;
+      }
+
+      this.applyClockSetting(clockEnabled);
+    } catch (error) {
+      console.error('Failed to load clock setting:', error);
+    }
+
     // 블러 설정
     try {
       const result = await chrome.storage.local.get(['blurEnabled', 'overlayBrightness']);
@@ -1054,6 +1077,17 @@ class SettingsManager {
     if (this.randomToggle instanceof HTMLInputElement) {
       const isRandom = this.randomToggle.checked;
       await this.backgroundManager.setRandomMode(isRandom);
+    }
+  }
+
+  /**
+   * 시계 토글 처리
+   */
+  async handleClockToggle() {
+    if (this.clockToggle instanceof HTMLInputElement) {
+      const clockEnabled = this.clockToggle.checked;
+      await this.saveClockSetting(clockEnabled);
+      this.applyClockSetting(clockEnabled);
     }
   }
 
@@ -1134,6 +1168,32 @@ class SettingsManager {
       await chrome.storage.local.set({ overlayBrightness: brightness });
     } catch (error) {
       console.error('Failed to save brightness setting:', error);
+    }
+  }
+
+  /**
+   * 시계 설정 적용
+   * @param {boolean} enabled
+   */
+  applyClockSetting(enabled) {
+    if (this.clockElement) {
+      if (enabled) {
+        this.clockElement.style.display = 'block';
+      } else {
+        this.clockElement.style.display = 'none';
+      }
+    }
+  }
+
+  /**
+   * 시계 설정 저장
+   * @param {boolean} enabled
+   */
+  async saveClockSetting(enabled) {
+    try {
+      await chrome.storage.local.set({ clockEnabled: enabled });
+    } catch (error) {
+      console.error('Failed to save clock setting:', error);
     }
   }
 }
