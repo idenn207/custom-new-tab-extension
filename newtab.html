@@ -129,25 +129,36 @@
         <div class="settings-content">
           <!-- 위젯 설정 -->
           <div class="settings-section active" id="settingsWidget">
-            <!-- 시계 위치 -->
+            <!-- 메인 위젯 -->
             <div class="settings-subsection">
-              <h3 class="settings-section-title">시계</h3>
+              <h3 class="settings-section-title">메인 위젯</h3>
 
               <div class="settings-item">
-                <label class="settings-item-label">시계 표시</label>
+                <label class="settings-item-label">위젯 표시</label>
                 <div class="toggle-container-inline">
-                  <input type="checkbox" id="clockToggle" class="toggle-input-small" checked>
-                  <label for="clockToggle" class="toggle-label-small">
+                  <input type="checkbox" id="mainWidgetToggle" class="toggle-input-small" checked>
+                  <label for="mainWidgetToggle" class="toggle-label-small">
                     <span class="toggle-text-small" data-on="ON" data-off="OFF"></span>
                   </label>
                 </div>
               </div>
-              <p class="settings-item-description">메인 화면의 시계를 표시하거나 숨깁니다</p>
+              <p class="settings-item-description">메인 화면의 위젯을 표시하거나 숨깁니다</p>
 
-              <div class="settings-item" id="clockPositionSetting">
-                <label class="settings-item-label">시계 위치</label>
+              <div class="settings-item">
+                <label class="settings-item-label">위젯 종류</label>
+                <div class="segment-control" id="widgetTypeSegment" role="group" aria-label="메인 위젯 종류">
+                  <button type="button" class="segment-option active" data-widget-type="clock"
+                    aria-pressed="true">시계</button>
+                  <button type="button" class="segment-option" data-widget-type="calendar"
+                    aria-pressed="false">달력</button>
+                </div>
               </div>
-              <div class="position-grid" id="clockPositionGrid">
+              <p class="settings-item-description">시계와 달력 중 하나를 메인 위젯으로 사용합니다</p>
+
+              <div class="settings-item" id="widgetPositionSetting">
+                <label class="settings-item-label">위젯 위치</label>
+              </div>
+              <div class="position-grid" id="widgetPositionGrid">
                 <button class="position-cell" data-position="top-left" title="왼쪽 위"></button>
                 <button class="position-cell" data-position="top-center" title="중앙 위"></button>
                 <button class="position-cell" data-position="top-right" title="오른쪽 위"></button>
@@ -158,6 +169,23 @@
                 <button class="position-cell" data-position="bottom-center" title="중앙 아래"></button>
                 <button class="position-cell" data-position="bottom-right" title="오른쪽 아래"></button>
               </div>
+            </div>
+
+            <!-- 달력 데이터 (달력 모드에서만 노출) -->
+            <div class="settings-subsection" id="calendarDataSetting" style="display: none;">
+              <div class="settings-divider"></div>
+              <h3 class="settings-section-title">달력 데이터</h3>
+
+              <div class="settings-item">
+                <label class="settings-item-label">백업</label>
+                <div class="settings-actions">
+                  <button type="button" class="btn-compact" id="calendarExportBtn">파일로 내보내기</button>
+                  <button type="button" class="btn-compact" id="calendarImportBtn">파일에서 가져오기</button>
+                  <input type="file" id="calendarImportInput" accept="application/json,.json" hidden>
+                </div>
+              </div>
+              <p class="settings-item-description">할 일은 이 브라우저에만 저장됩니다. 확장 프로그램을 지우면 함께 사라지니 주기적으로 내보내 두세요. 가져오기는 기존 할 일을 모두 교체합니다</p>
+              <p class="settings-status" id="calendarImportStatus" role="status"></p>
             </div>
 
             <div class="settings-divider"></div>
@@ -259,6 +287,66 @@
     <div class="clock" id="clock">
       <div class="time" id="time">00:00</div>
     </div>
+
+    <!-- 달력 -->
+    <section class="calendar-widget" id="calendarWidget" aria-label="달력">
+      <div class="calendar-header">
+        <button type="button" class="calendar-nav" data-nav="prev" aria-label="이전 달">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="15 18 9 12 15 6"></polyline>
+          </svg>
+        </button>
+        <h2 class="calendar-title" id="calendarTitle" aria-live="polite">&nbsp;</h2>
+        <button type="button" class="calendar-nav" data-nav="next" aria-label="다음 달">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+            stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <polyline points="9 18 15 12 9 6"></polyline>
+          </svg>
+        </button>
+        <button type="button" class="calendar-today" data-nav="today">오늘</button>
+      </div>
+
+      <div class="calendar-weekdays" aria-hidden="true">
+        <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
+      </div>
+
+      <div class="calendar-grid" id="calendarGrid" role="grid" aria-labelledby="calendarTitle">
+        <!-- JavaScript로 동적 생성 -->
+      </div>
+
+      <div class="calendar-panel" id="calendarPanel" hidden>
+        <div class="calendar-panel-header">
+          <h3 class="calendar-panel-title" id="calendarPanelTitle"></h3>
+          <button type="button" class="calendar-panel-close" aria-label="할 일 패널 닫기">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" aria-hidden="true">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        <ul class="calendar-todo-list" id="calendarTodoList" aria-labelledby="calendarPanelTitle">
+          <!-- JavaScript로 동적 생성 -->
+        </ul>
+        <form class="calendar-todo-form" id="calendarTodoForm">
+          <input type="text" class="calendar-todo-input" id="calendarTodoInput" placeholder="마감할 일 입력 후 Enter"
+            maxlength="500" autocomplete="off">
+          <button type="submit" class="calendar-todo-add" aria-label="할 일 추가">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" aria-hidden="true">
+              <line x1="12" y1="5" x2="12" y2="19"></line>
+              <line x1="5" y1="12" x2="19" y2="12"></line>
+            </svg>
+          </button>
+        </form>
+      </div>
+
+      <div class="calendar-error" id="calendarError" role="alert" hidden>
+        <span class="calendar-error-text" id="calendarErrorText"></span>
+        <button type="button" class="calendar-error-retry">다시 시도</button>
+      </div>
+    </section>
 
     <!-- 검색바 -->
     <div class="search-container">

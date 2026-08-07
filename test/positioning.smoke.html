@@ -1,0 +1,123 @@
+<!--
+  파일 위치: /my-newtab-extension/test/positioning.smoke.html
+  파일명: positioning.smoke.html
+  용도: 위젯/검색창 위치 로직 회귀 스모크 하네스
+  기능: 실제 newtab.html을 iframe으로 로드해 프로덕션 핸들러를 직접 구동하고 스냅샷 비교
+  책임: 리팩터링 전/후 동작 동일성 검증 (테스트 프레임워크·빌드 도구 없음)
+
+  ── 실행 방법 ────────────────────────────────────────────────────────────
+  1. chrome://extensions → 개발자 모드 → "압축해제된 확장 프로그램을 로드"
+  2. 주소창에 chrome-extension://<확장 ID>/test/positioning.smoke.html 입력
+  3. [베이스라인 캡처] → 리팩터링 전 코드에서 기준 저장
+  4. 코드 변경 후 [비교 실행] → diff 0 확인
+
+  ── 설계 근거 ────────────────────────────────────────────────────────────
+  DOM을 스텁으로 흉내내지 않는다. Application.initialize()는 15개 DOM 요소 중
+  하나라도 없으면 early return 하고 SettingsManager.initialize()도 10개 중 하나라도
+  없으면 early return 하므로, 부분 fixture는 프로덕션 위치 로직을 한 줄도 실행하지
+  못한 채 초록이 될 수 있다. 그래서 진짜 newtab.html을 통째로 띄운다.
+  확장 오리진에서 실행되므로 chrome.storage.local도 진짜다 (스텁 불필요).
+-->
+<!DOCTYPE html>
+<html lang="ko">
+
+<head>
+  <meta charset="UTF-8">
+  <title>위치 회귀 스모크 하네스</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif;
+      background: #101012;
+      color: rgba(255, 255, 255, 0.92);
+      padding: 24px;
+      line-height: 1.5;
+    }
+
+    h1 { font-size: 20px; margin-bottom: 4px; }
+    h2 { font-size: 14px; margin: 24px 0 8px; color: rgba(255, 255, 255, 0.7); }
+    p.lead { font-size: 13px; color: rgba(255, 255, 255, 0.6); margin-bottom: 16px; }
+
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; }
+
+    button {
+      padding: 8px 14px;
+      background: #1c1c20;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 8px;
+      color: inherit;
+      font: inherit;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    button:hover:not(:disabled) { background: #26262c; }
+    button:disabled { opacity: 0.45; cursor: not-allowed; }
+
+    #summary {
+      padding: 12px 14px;
+      border-radius: 8px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      font-size: 13px;
+      margin-bottom: 8px;
+      white-space: pre-wrap;
+    }
+    #summary.pass { border-color: rgba(80, 200, 120, 0.5); background: rgba(80, 200, 120, 0.1); }
+    #summary.fail { border-color: rgba(255, 99, 92, 0.5); background: rgba(255, 99, 92, 0.12); }
+
+    table { border-collapse: collapse; width: 100%; font-size: 12px; }
+    th, td {
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      padding: 5px 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th { background: rgba(255, 255, 255, 0.05); font-weight: 600; position: sticky; top: 0; }
+    td.ok { color: rgba(120, 220, 150, 0.95); }
+    td.diff { color: rgba(255, 130, 120, 0.95); }
+    tr.row-fail { background: rgba(255, 99, 92, 0.08); }
+
+    code { font-family: ui-monospace, 'Cascadia Code', Consolas, monospace; font-size: 11px; }
+
+    /* 실제 뷰포트 크기로 렌더해야 위치 계산이 유효하다 */
+    #stage {
+      position: fixed;
+      left: -20000px;
+      top: 0;
+      width: 1280px;
+      height: 800px;
+      border: 0;
+    }
+  </style>
+</head>
+
+<body>
+  <h1>위치 회귀 스모크 하네스</h1>
+  <p class="lead">
+    실제 <code>newtab.html</code>을 iframe으로 로드해 프로덕션 핸들러를 직접 호출합니다.
+    위치 로직을 복제하지 않으므로 하네스가 초록인데 실제가 깨지는 위양성이 생기지 않습니다.
+  </p>
+
+  <div class="controls">
+    <button id="runBaseline">베이스라인 캡처</button>
+    <button id="runCompare">비교 실행</button>
+    <button id="clearBaseline">베이스라인 삭제</button>
+  </div>
+
+  <div id="summary">대기 중</div>
+  <div id="progress" style="font-size:12px;color:rgba(255,255,255,0.55);margin-bottom:12px;"></div>
+
+  <h2>결과</h2>
+  <table id="results">
+    <thead>
+      <tr><th style="width:26%">케이스</th><th style="width:8%">상태</th><th>스냅샷 / 차이</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <iframe id="stage" src="about:blank"></iframe>
+
+  <script src="positioning.smoke.js"></script>
+</body>
+
+</html>
