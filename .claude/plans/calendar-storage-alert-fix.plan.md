@@ -181,6 +181,39 @@ Slice B(`.claude/plans/calendar-center-layout.plan.md`)가 착수 전에 해결�
 
 **이월되는 계약** — Slice B의 C1(`this.events` 불변)·C2(저장값과 실효 가시성 분리)는 r2 심사에서 security가 실제로 닫혔다고 확인했다. 그대로 유지한다.
 
-## Codex Adversarial Review
+## 구현 결과 (r3 지적 반영 포함)
 
-<!-- placeholder: will be replaced by Phase 7.3 -->
+게이트는 r3에서 `divergent`로 차단됐고 **receipt 없이** 사용자 결정에 따라 구현했다. r3의 계획 결함 6건은
+구현에 반영했다. 하네스 구조 지적은 일부만 해소하고 나머지를 Slice B로 넘겼다.
+
+### r3 지적 처리
+
+| 지적 | 처리 |
+|---|---|
+| HIGH · 오버레이가 `.calendar-todo-form`을 덮는다 | `.has-error .calendar-panel { padding-bottom }`로 폼을 배너 위로 올렸다. 1440×900 실측에서 배너 표시 중 입력창이 `elementFromPoint`로 도달 가능하고 밴드 높이·월 그리드 높이가 모두 불변이다 |
+| HIGH · `loadFailed`가 가져오기(복구 경로)까지 막는다 | `persistEvents(next, { isFullReplacement: true })`. `replaceEvents()`만 잠금을 통과하고, 성공하면 잠금이 풀린다 |
+| HIGH · 전체 트리 커밋이 절대 경로를 커밋시킨다 | `.gitignore` 신설 — `.claude/state\|cache\|receipts\|notes` 제외. 커밋 전 `git status`로 확인했다 |
+| MEDIUM · 다시 시도 버튼의 소유자가 둘 | `retryFailedOperation()` 신설. `loadFailed`가 우선한다 — 그 상태의 `retryPersist()`는 잠금에 걸려 아무 일도 못 한다 |
+| MEDIUM · C1이 rejection만 닫는다 | `loadEvents()`가 배열이 아닌 저장값을 명시적으로 던진다. `undefined`(첫 실행)와 구분한다 |
+| MEDIUM · 생성자가 이미 `events = []`라 "정의되지 않은 상태"가 성립 안 함 | 계약 문구를 고쳤다. 실질 가드는 `loadFailed` 플래그이며, `getEvents()`가 아니라 `canExport()`가 내보내기를 막는다 |
+| LOW · `getEvents()` 복사 깊이 미규정 | 배열 + 항목 얕은 복사(`map(e => ({...e}))`). 이벤트는 평면 객체다 |
+| HIGH · 어댑터 주입 이음매 없음 | **불필요했다.** 손상된 저장값을 시드하는 것만으로 읽기 실패 경로에 들어간다. 하네스가 이미 하는 일이다 |
+| HIGH · 배너를 띄울 수단 없음 | **불필요했다.** 하네스가 `window.__newTabApp`으로 매니저를 잡아 `showError()`를 직접 부른다 |
+| HIGH · assert 채널이 앱 오류와 같은 통로를 공유 | `assertFailures`를 `capturedErrors`와 **분리**했다. 실패 경로 케이스가 앱 `console.error`를 부르는 것은 정상 동작이므로 섞으면 안 된다 |
+| HIGH · `errorCount`가 케이스별이라 assert가 조용히 사라진다 | 위와 같은 분리로 해소. `assertFailures`는 전역이고 베이스라인과 무관하다 |
+| CRITICAL(r2)·MEDIUM(r3) · 베이스라인이 실행 중 증발 | `runAll` 진입 시점에 `BASELINE_KEY`를 떠 두고 `finally`에서 그 사본을 복원한다 |
+| HIGH · 부분 비교 불가 / 앵커 해시 스탬프 없음 | **미해소.** Slice B 선행 과제로 남겼다 |
+
+### 검증
+
+- **node VM 단위 검사 27건 전부 통과** — `selectStorageBackend` 5분기, local-preview 어댑터 왕복·손상 reject 6종,
+  `none` 4연산 reject, extension 통과 동일성, `createCalendarEvent` 회귀
+- **localhost 종단 확인** (`http://localhost:8777`) — 할 일 추가·저장·새로고침 잔존, 오류 배너 없음,
+  미리보기 고지 표시, `body[data-storage-backend="local-preview"]`
+- **C1 종단 확인** — 손상 주입 → `loadFailed` · 배너 · 쓰기 거절 · **저장소 원본 불변** · 내보내기 거절 ·
+  가져오기 통과 · 잠금 해제
+- **UI8 확인** (1440×900) — 패널 열림/닫힘 × 배너 있음/없음 네 상태에서 밴드 높이 411px, 월 그리드 342px,
+  월 스크롤 0으로 전부 불변. 배너 표시 중 입력창 도달 가능
+- **시계 경로 회귀 없음** — `position-center-center overlap-offset` 유지, 검색창 정상, `has-calendar-band` 꺼짐
+
+미실행: 확장 오리진 스모크 하네스(압축 해제 로드 필요). 신규 케이스 3종은 코드에 있으나 아직 돌리지 않았다.

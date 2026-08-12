@@ -32,6 +32,30 @@ const resultsBody = document.querySelector('#results tbody');
 /** @type {string[]} 현재 로드된 iframe에서 수집된 콘솔/런타임 오류 */
 let capturedErrors = [];
 
+/**
+ * 단언 실패 목록. **capturedErrors와 의도적으로 분리한다.**
+ *
+ * 실패 경로를 검증하는 케이스(손상된 저장값 시드 등)는 앱이 console.error를
+ * 부르는 것이 **정상 동작**이다. 두 신호를 한 배열에 섞으면 그런 케이스가
+ * 하네스를 영구 빨간불로 만들고, 곧 아무도 그 색을 믿지 않게 된다.
+ *
+ * 이 배열은 베이스라인과도 무관하다 — 베이스라인을 다시 떠도 단언 실패는
+ * 사라지지 않는다. 스냅샷 값 비교만으로는 잡히지 않는 회귀를 여기서 잡는다.
+ * @type {string[]}
+ */
+let assertFailures = [];
+
+/**
+ * 단언. 실패하면 요약을 빨간불로 만든다 (베이스라인과 무관)
+ * @param {boolean} condition
+ * @param {string} message - 무엇이 틀렸는지. 값이 아니라 기대를 적는다
+ * @returns {boolean} condition 그대로 — 스냅샷에도 함께 기록하기 위해
+ */
+function assert(condition, message) {
+  if (!condition) assertFailures.push(message);
+  return condition;
+}
+
 /* ────────────────────────── 유틸 ────────────────────────── */
 
 /**
@@ -767,6 +791,174 @@ async function runSanitizeCases(collector) {
   progress('sanitize cases 완료');
 }
 
+/**
+ * 스토리지 백엔드 선택 — 세 분기 전부
+ *
+ * `selectStorageBackend`는 최상위 순수 함수라 가짜 참조를 넣어 직접 부를 수 있다
+ * (makeDateKey·migrateCalendarToV3를 부르는 것과 같은 방식). 확장 오리진에서
+ * 실행되는 하네스가 확장이 아닌 분기까지 확인할 수 있는 유일한 방법이다.
+ * @param {ReturnType<typeof createCollector>} collector
+ */
+async function runStorageBackendCases(collector) {
+  const frameWindow = await loadApp({});
+  const select = frameWindow['selectStorageBackend'];
+
+  const fakeChrome = { storage: { local: {} } };
+  const fakeLocalStorage = {
+    _v: /** @type {Record<string, string>} */ ({}),
+    setItem(k, v) { this._v[k] = String(v); },
+    getItem(k) { return Object.prototype.hasOwnProperty.call(this._v, k) ? this._v[k] : null; },
+    removeItem(k) { delete this._v[k]; },
+  };
+  const blockedLocalStorage = {
+    setItem() { throw new Error('SecurityError: 접근 차단'); },
+    getItem() { return null; },
+    removeItem() {},
+  };
+
+  const extension = select({ chromeRef: fakeChrome, localStorageRef: fakeLocalStorage });
+  const preview = select({ chromeRef: undefined, localStorageRef: fakeLocalStorage });
+  const blocked = select({ chromeRef: undefined, localStorageRef: blockedLocalStorage });
+  const nothing = select({});
+
+  // 확장이 있으면 무조건 확장이다. 있는데 미리보기로 떨어지면 사용자 데이터가
+  // 기대와 다른 곳에 쌓인다 (원칙 4).
+  assert(extension === 'extension', `chrome.storage 존재 시 'extension'이어야 하는데 '${extension}'`);
+  assert(preview === 'local-preview', `chrome 부재 + localStorage 가용 시 'local-preview'여야 하는데 '${preview}'`);
+  // 존재 확인만으로는 부족하다. setItem이 던지는 환경을 가용으로 보면 안 된다.
+  assert(blocked === 'none', `localStorage가 던지면 'none'이어야 하는데 '${blocked}'`);
+  assert(nothing === 'none', `둘 다 없으면 'none'이어야 하는데 '${nothing}'`);
+
+  // 실제 확장 오리진에서 돌고 있으므로 앱이 고른 값은 extension이어야 한다.
+  const actual = frameWindow.document.body.dataset.storageBackend;
+  assert(actual === 'extension', `확장 오리진에서 실제 백엔드가 'extension'이어야 하는데 '${actual}'`);
+
+  collector.add('storage/backend-selection', {
+    extension,
+    preview,
+    blocked,
+    nothing,
+    actual,
+    noticeHidden: frameWindow.document.getElementById('storageNotice').hidden,
+  }, capturedErrors);
+
+  progress('storage backend cases 완료');
+}
+
+/**
+ * 읽기 실패 시 기존 일정이 보존되는가 (데이터 소실 봉인)
+ *
+ * 손상된 저장값을 **시드하는 것만으로** 읽기 실패 경로에 들어간다. 모듈 평가 전
+ * 훅이나 가짜 어댑터 주입이 필요 없다 — 하네스가 이미 하는 일이다.
+ *
+ * 예전 동작: loadEvents의 catch가 `this.events = []`를 정상으로 만들고,
+ * 할 일을 하나 추가하면 `[한 건]`이 커밋되어 저장돼 있던 것이 전부 사라졌다.
+ * @param {ReturnType<typeof createCollector>} collector
+ */
+async function runLoadFailureCases(collector) {
+  // 배열이 아닌 값 = 손상. createCalendarEvent가 걸러낼 수 있는 형태가 아니다.
+  const corrupt = { broken: 'not an array' };
+  const frameWindow = await loadApp({ widgetType: 'calendar', calendarEvents: corrupt, settingsVersion: 3 });
+  const calendar = frameWindow['__newTabApp'].calendarManager;
+
+  const flaggedAfterLoad = calendar.loadFailed === true;
+  assert(flaggedAfterLoad, '손상된 calendarEvents를 읽으면 loadFailed가 서야 한다');
+
+  const errorVisible = frameWindow.document.getElementById('calendarError').hidden === false;
+  assert(errorVisible, '읽기 실패 시 오류 배너가 보여야 한다');
+
+  // 쓰기가 막히는가
+  const todayKey = frameWindow.makeDateKey(new Date());
+  const addCommitted = await calendar.addEvent({ startDate: todayKey, endDate: todayKey, title: '차단되어야 함' });
+  assert(addCommitted === false, '읽기 실패 상태에서 할 일 추가는 거절되어야 한다');
+
+  // **저장소가 그대로인가** — 이 케이스의 존재 이유다.
+  const afterAdd = await chrome.storage.local.get(['calendarEvents']);
+  const untouched = JSON.stringify(afterAdd.calendarEvents) === JSON.stringify(corrupt);
+  assert(untouched, '읽기 실패 상태의 쓰기가 저장소를 덮어써서는 안 된다 (데이터 소실)');
+
+  // 내보내기도 막히는가 — 빈 파일을 백업이라 믿게 두지 않는다
+  assert(calendar.canExport() === false, '읽기 실패 상태에서는 내보내기가 막혀야 한다');
+
+  // 가져오기는 **통과해야** 한다. 읽기가 영구히 깨졌을 때 유일한 복구 수단이다.
+  const recovered = await calendar.replaceEvents([
+    frameWindow.createCalendarEvent({ startDate: todayKey, endDate: todayKey, title: '복구본' }),
+  ]);
+  assert(recovered === true, '가져오기(전체 교체)는 loadFailed 잠금을 통과해야 한다');
+  assert(calendar.loadFailed === false, '가져오기가 성공하면 잠금이 풀려야 한다');
+
+  collector.add('storage/load-failure-preserves-data', {
+    flaggedAfterLoad,
+    errorVisible,
+    addCommitted,
+    untouched,
+    recovered,
+    clearedAfterRecovery: calendar.loadFailed === false,
+  }, capturedErrors);
+
+  progress('load failure cases 완료');
+}
+
+/**
+ * 오류 배너가 자리를 먹지 않는가 (원래 버그)
+ *
+ * 배너는 하네스가 showError()를 직접 불러 띄운다 — 앱 인스턴스에 이미 접근하고
+ * 있으므로(calendar.selectDate 등과 같은 방식) 별도 실패 주입 장치가 필요 없다.
+ * @param {ReturnType<typeof createCollector>} collector
+ */
+async function runErrorBannerGeometryCases(collector) {
+  const frameWindow = await loadApp({ widgetType: 'calendar', settingsVersion: 3, mainWidgetEnabled: true });
+  const doc = frameWindow.document;
+  const calendar = frameWindow['__newTabApp'].calendarManager;
+
+  const widget = doc.getElementById('calendarWidget');
+  const month = doc.querySelector('.calendar-month');
+
+  // 패널을 열어 입력 폼이 존재하는 상태로 만든다 (차폐 검사 대상)
+  calendar.selectDate(frameWindow.makeDateKey(new Date()));
+  await settle();
+
+  const before = {
+    widgetHeight: Math.round(widget.getBoundingClientRect().height),
+    monthScroll: month.scrollHeight - month.clientHeight,
+  };
+
+  calendar.showError('스모크: 배너 기하 검사');
+  await settle();
+
+  const after = {
+    widgetHeight: Math.round(widget.getBoundingClientRect().height),
+    monthScroll: month.scrollHeight - month.clientHeight,
+  };
+
+  assert(
+    before.widgetHeight === after.widgetHeight,
+    `배너 표시가 밴드 높이를 바꾸면 안 된다 (${before.widgetHeight} → ${after.widgetHeight})`
+  );
+  assert(
+    before.monthScroll === after.monthScroll,
+    `배너 표시가 월 그리드에 스크롤을 만들면 안 된다 (${before.monthScroll} → ${after.monthScroll})`
+  );
+
+  // 입력 폼이 배너에 가려지지 않는가 — 저장에 실패한 순간 다시 입력할 창이다
+  const input = doc.querySelector('.calendar-todo-input');
+  const rect = input.getBoundingClientRect();
+  const hit = doc.elementFromPoint(Math.round(rect.left + rect.width / 2), Math.round(rect.top + rect.height / 2));
+  const inputReachable = Boolean(hit && (hit === input || input.contains(hit)));
+  assert(inputReachable, '배너 표시 중에도 할 일 입력창이 포인터로 도달 가능해야 한다');
+
+  calendar.hideError();
+  await settle();
+
+  collector.add('calendar/error-banner-geometry', {
+    heightInvariant: before.widgetHeight === after.widgetHeight,
+    monthScrollInvariant: before.monthScroll === after.monthScroll,
+    inputReachable,
+  }, capturedErrors);
+
+  progress('error banner geometry cases 완료');
+}
+
 /* ────────────────────────── 실행 / 비교 ────────────────────────── */
 
 /**
@@ -782,7 +974,18 @@ function progress(message) {
  */
 async function runAll() {
   const original = await chrome.storage.local.get(null);
+  /**
+   * 베이스라인을 **여기서** 떠 둔다.
+   *
+   * loadApp이 케이스마다 storage.clear()를 부르므로 BASELINE_KEY도 함께 지워진다.
+   * finally에서 읽으면 이미 사라진 뒤라 복원이 no-op이 되고, 저장된 베이스라인이
+   * 비교 한 번에 증발했다. 그러면 다음 비교는 이미 바뀐 코드에서 기준을 다시
+   * 떠야 하고, 회귀가 새 기준으로 굳는다.
+   */
+  const baselineBackup = original[BASELINE_KEY];
   delete original[BASELINE_KEY];
+
+  assertFailures = [];
 
   const collector = createCollector();
   try {
@@ -799,14 +1002,16 @@ async function runAll() {
     await runSummaryCases(collector);
     await runDateKeyCases(collector);
     await runSanitizeCases(collector);
+    await runStorageBackendCases(collector);
+    await runLoadFailureCases(collector);
+    await runErrorBannerGeometryCases(collector);
   } finally {
     stage.src = 'about:blank';
     stage.style.width = '1280px';
     stage.style.height = '800px';
-    const baseline = await chrome.storage.local.get([BASELINE_KEY]);
     await chrome.storage.local.clear();
     await chrome.storage.local.set(original);
-    if (baseline[BASELINE_KEY]) await chrome.storage.local.set(baseline);
+    if (baselineBackup) await chrome.storage.local.set({ [BASELINE_KEY]: baselineBackup });
     progress('스토리지 원복 완료');
   }
   return collector.results;
@@ -872,12 +1077,33 @@ function renderResults(current, baseline) {
     resultsBody.appendChild(row);
   });
 
-  const passed = failCount === 0 && errorCount === 0;
+  // 단언 실패는 베이스라인과 무관하게 실패다. 베이스라인 캡처 모드에서도
+  // 마찬가지다 — 잘못된 값을 새 기준으로 굳히는 것을 여기서 막는다.
+  const assertCount = assertFailures.length;
+  const passed = failCount === 0 && errorCount === 0 && assertCount === 0;
   summaryElement.className = passed ? 'pass' : 'fail';
   summaryElement.textContent = baseline
-    ? `케이스 ${names.length}건 · 차이 ${failCount}건 · 오류 발생 케이스 ${errorCount}건` +
+    ? `케이스 ${names.length}건 · 차이 ${failCount}건 · 오류 발생 케이스 ${errorCount}건 · 단언 실패 ${assertCount}건` +
       (passed ? ' → 회귀 없음' : ' → 확인 필요')
-    : `베이스라인 ${names.length}건 캡처 완료` + (errorCount > 0 ? ` · 오류 발생 케이스 ${errorCount}건` : '');
+    : `베이스라인 ${names.length}건 캡처 완료` +
+      (errorCount > 0 ? ` · 오류 발생 케이스 ${errorCount}건` : '') +
+      (assertCount > 0 ? ` · 단언 실패 ${assertCount}건 (캡처된 값을 믿지 마세요)` : '');
+
+  if (assertCount > 0) {
+    const row = document.createElement('tr');
+    row.className = 'row-fail';
+    const nameCell = document.createElement('td');
+    nameCell.appendChild(document.createElement('code')).textContent = '단언 실패';
+    row.appendChild(nameCell);
+    const statusCell = document.createElement('td');
+    statusCell.className = 'diff';
+    statusCell.textContent = `${assertCount}건`;
+    row.appendChild(statusCell);
+    const detailCell = document.createElement('td');
+    detailCell.appendChild(document.createElement('code')).textContent = assertFailures.join('\n');
+    row.appendChild(detailCell);
+    resultsBody.insertBefore(row, resultsBody.firstChild);
+  }
 }
 
 /**

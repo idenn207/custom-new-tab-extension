@@ -710,8 +710,23 @@ body {
    *
    * 오른쪽 묶음이 더 넓어서(100px) 그 값에 맞춰 양쪽을 같게 뒀다. 왼쪽에 남는
    * 56px은 빈 밴드 표면으로 보여 좌우 균형이 맞는다.
+   *
+   * 변수로 뽑은 이유: 오류 배너가 오버레이가 되면서 이 값에 맞춰 인셋을 잡아야
+   * 한다. 리터럴로 두면 좁은 폭에서 패딩만 120px로 바뀌고 배너가 따라가지 않아
+   * 둘이 어긋난다.
    */
-  padding: var(--space-sm) 136px var(--space-md);
+  --calendar-inline-pad: 136px;
+
+  /*
+   * 오버레이 배너가 실제로 덮는 세로 공간. 할 일 패널이 비켜설 거리다.
+   * 배너 높이(본문 1줄 + 상하 10px 패딩 + 테두리) + 아래 여백.
+   */
+  --calendar-error-space: 56px;
+
+  /* 배너의 bottom 인셋이 이 값을 따라간다 — 아래 반응형에서 함께 바뀐다 */
+  --calendar-block-pad-end: var(--space-md);
+
+  padding: var(--space-sm) var(--calendar-inline-pad) var(--calendar-block-pad-end);
 
   background: var(--bg-secondary-glass);
   backdrop-filter: blur(10px) saturate(115%) brightness(0.62);
@@ -1326,16 +1341,82 @@ body[data-widget-type="calendar"] .calendar-widget {
   outline-offset: 2px;
 }
 
-/* --- 저장 실패 배너 --- */
+/* ===== 저장소 고지 (미리보기 모드 전용) ===== */
+/*
+ * 확장 저장소가 아닌 곳에 저장되고 있다는 사실만 말한다. 원칙 4는 저장 위치가
+ * 기대와 다를 때 침묵하지 말라고 요구하고, 원칙 1은 조용하라고 요구한다 —
+ * 화면 아래 가장자리의 작은 유리 알약이 둘을 동시에 만족하는 지점이다.
+ *
+ * 확장에서는 이 노드가 hidden 그대로라 존재하지 않는 것과 같다.
+ */
+.storage-notice {
+  position: fixed;
+  left: 50%;
+  bottom: var(--space-sm);
+  transform: translateX(-50%);
+  z-index: 120;
+
+  max-width: min(92vw, 560px);
+  padding: 6px 12px;
+  background: var(--bg-secondary-glass);
+  backdrop-filter: blur(10px) brightness(0.62);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+  /* 본문 대비 기준. 밝은 배경 사진 위에서도 읽혀야 한다 (원칙 3) */
+  color: rgba(255, 255, 255, 0.86);
+}
+
+.storage-notice[hidden] {
+  display: none;
+}
+
+/* --- 저장·읽기 실패 배너 --- */
+/*
+ * 오버레이다. 이전에는 밴드의 마지막 flex 자식이라 나타나는 순간 높이 예산
+ * (max-height: min(48vh,480px))을 먹었고, 밀려난 만큼 .calendar-month에
+ * 내부 스크롤이 생겼다. 실패를 알리는 것이 화면을 흔드는 대가를 치를 이유가 없다.
+ *
+ * 인셋은 밴드의 좌우 패딩과 같은 변수를 쓴다 — 배너가 내용 폭에 정렬된다.
+ * 밴드가 position:absolute라 여기서 별도 containing block을 만들 필요는 없다.
+ */
 .calendar-error {
+  position: absolute;
+  left: var(--calendar-inline-pad);
+  right: var(--calendar-inline-pad);
+  bottom: var(--calendar-block-pad-end);
+  z-index: 2;
+
   display: flex;
   align-items: center;
   gap: var(--space-xs);
-  margin-top: var(--space-sm);
   padding: 10px 12px;
-  background: rgba(255, 99, 92, 0.16);
-  border: 1px solid rgba(255, 99, 92, 0.42);
+  /* 오버레이라 뒤에 그리드가 비친다. 불투명도를 올려 본문 대비를 지킨다 (원칙 3) */
+  background: rgba(96, 30, 28, 0.92);
+  border: 1px solid rgba(255, 99, 92, 0.52);
   border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.36);
+}
+
+/*
+ * 배너가 덮는 것 중 **입력 폼만** 비켜준다.
+ *
+ * .calendar-todo-form은 리스트의 형제라 리스트 패딩으로 밀리지 않는다. 저장에
+ * 실패한 바로 그 순간 다시 입력해야 할 창이 가려지면, 실패를 알리는 장치가
+ * 조작을 막는 장치로 변질된다.
+ *
+ * 월 그리드는 **비켜주지 않는다.** 비켜주면 세로 공간이 줄어 애초에 고치려던
+ * 스크롤이 그대로 재발한다. 대신 스크롤로 배너 아래에 닿을 수 있게 해 둔다.
+ */
+.calendar-widget.has-error .calendar-panel {
+  padding-bottom: var(--calendar-error-space);
+}
+
+.calendar-widget.has-error .calendar-month {
+  scroll-padding-bottom: var(--calendar-error-space);
 }
 
 .calendar-error[hidden] {
@@ -2610,8 +2691,9 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
 
   /* 코너 토글은 이 폭에서도 24px/44px 그대로다 — 자리 비움을 줄이지 않는다 */
   .calendar-widget {
+    --calendar-block-pad-end: var(--space-sm);
     padding-top: var(--space-xs);
-    padding-bottom: var(--space-sm);
+    padding-bottom: var(--calendar-block-pad-end);
   }
 }
 
@@ -2727,7 +2809,13 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
    */
   .calendar-widget {
     max-height: min(56vh, 420px);
-    padding: var(--space-xs) 120px var(--space-sm);
+    /*
+     * 리터럴 대신 변수를 덮는다. 배너 오버레이가 같은 변수로 인셋을 잡으므로
+     * 여기서 padding만 줄이면 배너가 옛 136px 자리에 남아 어긋난다.
+     */
+    --calendar-inline-pad: 120px;
+    --calendar-block-pad-end: var(--space-sm);
+    padding: var(--space-xs) var(--calendar-inline-pad) var(--calendar-block-pad-end);
   }
 
   .calendar-widget .calendar-day {

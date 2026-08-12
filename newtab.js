@@ -70,6 +70,130 @@ const DUE_STATE_LABELS = { overdue: '지연', today: '오늘 마감', soon: '내
  */
 const MAX_CHIPS_PER_CELL = 2;
 
+/** 미리보기 백엔드가 모든 설정을 담는 단일 localStorage 키 */
+const PREVIEW_STORAGE_KEY = '__newTabPreviewStorage__';
+
+/**
+ * 스토리지 백엔드 결정 (순수 함수)
+ *
+ * 가용성만 본다. 실행 중 오류로 다른 백엔드로 넘어가는 일은 **없다** — 넘어가면
+ * 사용자가 적은 것이 기대와 다른 곳에 저장되고 UI는 성공한 척한다 (원칙 4).
+ *
+ * 인자를 받는 이유는 테스트 때문이다. 스모크 하네스가 가짜 참조를 넣어
+ * 세 분기를 전부 확인한다 (makeDateKey·migrateCalendarToV3와 같은 호출 방식).
+ *
+ * @param {{chromeRef?: any, localStorageRef?: any}} [refs]
+ * @returns {'extension'|'local-preview'|'none'}
+ */
+function selectStorageBackend(refs) {
+  const { chromeRef, localStorageRef } = refs || {};
+
+  if (chromeRef && chromeRef.storage && chromeRef.storage.local) return 'extension';
+
+  // 존재 확인만으로는 부족하다. Safari 비공개 모드나 사이트 차단 설정에서는
+  // localStorage가 있는데 setItem이 던진다.
+  try {
+    if (localStorageRef) {
+      const probe = `${PREVIEW_STORAGE_KEY}probe`;
+      localStorageRef.setItem(probe, '1');
+      localStorageRef.removeItem(probe);
+      return 'local-preview';
+    }
+  } catch (error) {
+    // 접근 불가 — 아래 'none'으로 떨어진다
+  }
+
+  return 'none';
+}
+
+/**
+ * 선택된 백엔드로 `chrome.storage.local` 모양의 Promise API를 만든다
+ *
+ * 계약 세 가지:
+ * 1. `extension`은 **통과일 뿐**이다. 키 형태를 바꾸지 않는다 — 스모크 하네스가
+ *    원시 키를 직접 시드·백업·복원하므로 형태를 바꾸면 조용히 깨진다
+ * 2. 손상·접근 불가는 **reject**한다. 빈 객체를 돌려주면 loadEvents()가 그것을
+ *    정상으로 받아 데이터 소실이 무증상이 된다
+ * 3. 어떤 실패에서도 다른 백엔드로 넘어가지 않는다
+ *
+ * @param {'extension'|'local-preview'|'none'} backend
+ * @param {{chromeRef?: any, localStorageRef?: any}} [refs]
+ */
+function createStorageAdapter(backend, refs) {
+  const { chromeRef, localStorageRef } = refs || {};
+
+  if (backend === 'extension') return chromeRef.storage.local;
+
+  if (backend === 'none') {
+    const fail = () =>
+      Promise.reject(new Error('사용 가능한 저장소가 없습니다 (확장 저장소·localStorage 모두 접근 불가)'));
+    return { get: fail, set: fail, remove: fail, clear: fail };
+  }
+
+  /** @returns {Record<string, any>} 손상 시 throw */
+  const readAll = () => {
+    const raw = localStorageRef.getItem(PREVIEW_STORAGE_KEY);
+    if (raw === null) return {};
+    const parsed = JSON.parse(raw); // 손상이면 여기서 던진다 — 계약 2
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('미리보기 저장소 형식이 올바르지 않습니다');
+    }
+    return parsed;
+  };
+
+  const writeAll = (next) => localStorageRef.setItem(PREVIEW_STORAGE_KEY, JSON.stringify(next));
+
+  return {
+    /** @param {string[]|string|null} [keys] */
+    async get(keys) {
+      const all = readAll();
+      if (keys === null || keys === undefined) return all;
+      const list = Array.isArray(keys) ? keys : [keys];
+      const picked = {};
+      list.forEach((key) => {
+        if (Object.prototype.hasOwnProperty.call(all, key)) picked[key] = all[key];
+      });
+      return picked;
+    },
+    /** @param {Record<string, any>} items */
+    async set(items) {
+      const all = readAll();
+      Object.keys(items).forEach((key) => {
+        all[key] = items[key];
+      });
+      writeAll(all); // QuotaExceededError는 그대로 던진다 — 배너가 받는다
+    },
+    /** @param {string[]|string} keys */
+    async remove(keys) {
+      const all = readAll();
+      (Array.isArray(keys) ? keys : [keys]).forEach((key) => {
+        delete all[key];
+      });
+      writeAll(all);
+    },
+    async clear() {
+      localStorageRef.removeItem(PREVIEW_STORAGE_KEY);
+    },
+  };
+}
+
+/** 이 실행에서 고른 백엔드. 모듈 로드 시 1회 결정하고 이후 바뀌지 않는다 */
+const STORAGE_BACKEND = selectStorageBackend({
+  chromeRef: typeof chrome !== 'undefined' ? chrome : undefined,
+  localStorageRef: typeof localStorage !== 'undefined' ? localStorage : undefined,
+});
+
+/**
+ * 앱 전체의 유일한 저장소 진입점
+ *
+ * `chrome.storage.local`을 직접 부르지 않는다. 확장 오리진이 아닌 곳(로컬 서버
+ * 미리보기)에서는 `chrome.storage`가 아예 없어 모든 저장이 TypeError로 실패했다.
+ */
+const storage = createStorageAdapter(STORAGE_BACKEND, {
+  chromeRef: typeof chrome !== 'undefined' ? chrome : undefined,
+  localStorageRef: typeof localStorage !== 'undefined' ? localStorage : undefined,
+});
+
 /**
  * @typedef {Object} CalendarEvent
  * @property {string} id          - crypto.randomUUID()
@@ -237,11 +361,11 @@ function stripPositioningClasses(element) {
  *
  * 반드시 Application.initialize()의 첫 줄에서 await 해야 한다.
  * 매니저 내부에서 실행하면 다른 매니저가 복사 이전 값을 읽는 경합이 생긴다.
- * @returns {Promise<void>}
+ * @returns {Promise<boolean>} 성공 여부. 실패를 조용히 넘기지 않고 고지에 반영한다
  */
 async function migrateSettingsToV2() {
   try {
-    const stored = await chrome.storage.local.get([
+    const stored = await storage.get([
       'settingsVersion',
       'mainWidgetEnabled',
       'mainWidgetPosition',
@@ -251,15 +375,17 @@ async function migrateSettingsToV2() {
 
     // 자체 가드. SETTINGS_VERSION(3)을 쓰면 이 마이그레이션 하나로 버전이 3이 되어
     // migrateCalendarToV3가 영영 실행되지 않는다.
-    if ((stored.settingsVersion ?? 1) >= SETTINGS_VERSION_V2) return;
+    if ((stored.settingsVersion ?? 1) >= SETTINGS_VERSION_V2) return true;
 
-    await chrome.storage.local.set({
+    await storage.set({
       mainWidgetEnabled: stored.mainWidgetEnabled ?? stored.clockEnabled !== false,
       mainWidgetPosition: stored.mainWidgetPosition ?? (stored.clockPosition || 'center-center'),
       settingsVersion: SETTINGS_VERSION_V2,
     });
+    return true;
   } catch (error) {
     console.error('Failed to migrate settings:', error);
+    return false;
   }
 }
 
@@ -279,17 +405,17 @@ async function migrateSettingsToV2() {
  *
  * 세 키를 **한 번의 set으로** 커밋한다. 두 번으로 나누면 사이에서 죽었을 때
  * 버전만 올라가거나 이벤트만 승격된 반쪽 상태가 남는다.
- * @returns {Promise<void>}
+ * @returns {Promise<boolean>} 성공 여부. 실패를 조용히 넘기지 않고 고지에 반영한다
  */
 async function migrateCalendarToV3() {
   try {
-    const stored = await chrome.storage.local.get([
+    const stored = await storage.get([
       'settingsVersion',
       'calendarEvents',
       'searchWidthByWidget',
     ]);
 
-    if ((stored.settingsVersion ?? 1) >= SETTINGS_VERSION) return;
+    if ((stored.settingsVersion ?? 1) >= SETTINGS_VERSION) return true;
 
     const rawEvents = Array.isArray(stored.calendarEvents) ? stored.calendarEvents : [];
     /** @type {CalendarEvent[]} */
@@ -309,14 +435,51 @@ async function migrateCalendarToV3() {
       nextWidths.clock = widths.clock;
     }
 
-    await chrome.storage.local.set({
+    await storage.set({
       calendarEvents: promoted,
       searchWidthByWidget: nextWidths,
       settingsVersion: SETTINGS_VERSION,
     });
+    return true;
   } catch (error) {
     console.error('Failed to migrate calendar to v3:', error);
+    return false;
   }
+}
+
+/**
+ * 저장소 상태를 화면과 DOM에 고지한다
+ *
+ * 확장 저장소가 아닌 곳에 저장되고 있거나 마이그레이션이 실패했다면 침묵하지
+ * 않는다 (PRODUCT.md 원칙 4). 확장에서 정상이면 아무것도 그리지 않는다.
+ *
+ * body에 쓰므로 모듈 평가 시점이 아니라 initialize()에서 부른다.
+ * @param {{migrationFailed: boolean}} state
+ */
+function applyStorageNotice(state) {
+  document.body.dataset.storageBackend = STORAGE_BACKEND;
+
+  const element = document.getElementById('storageNotice');
+  if (!element) return;
+
+  /** @type {string[]} */
+  const messages = [];
+  if (STORAGE_BACKEND === 'local-preview') {
+    messages.push('미리보기 모드 · 확장 저장소가 아닌 이 브라우저에만 저장됩니다');
+  } else if (STORAGE_BACKEND === 'none') {
+    messages.push('저장소를 쓸 수 없습니다 · 이 화면에서 바꾼 내용은 남지 않습니다');
+  }
+  if (state.migrationFailed) {
+    messages.push('설정 마이그레이션 실패');
+  }
+
+  if (messages.length === 0) {
+    element.hidden = true;
+    return;
+  }
+
+  element.textContent = messages.join(' · ');
+  element.hidden = false;
 }
 
 /**
@@ -438,7 +601,7 @@ class BackgroundManager {
    */
   async loadUploadedImages() {
     try {
-      const result = await chrome.storage.local.get(['uploadedImages']);
+      const result = await storage.get(['uploadedImages']);
       this.uploadedImages = result.uploadedImages || [];
     } catch (error) {
       console.error('Failed to load uploaded images:', error);
@@ -451,7 +614,7 @@ class BackgroundManager {
    */
   async loadSettings() {
     try {
-      const result = await chrome.storage.local.get(['isRandomMode', 'fixedImage']);
+      const result = await storage.get(['isRandomMode', 'fixedImage']);
       this.isRandomMode = result.isRandomMode !== false;
       this.fixedImage = result.fixedImage || null;
     } catch (error) {
@@ -569,7 +732,7 @@ class BackgroundManager {
    */
   async saveUploadedImages() {
     try {
-      await chrome.storage.local.set({ uploadedImages: this.uploadedImages });
+      await storage.set({ uploadedImages: this.uploadedImages });
     } catch (error) {
       console.error('Failed to save uploaded images:', error);
     }
@@ -599,7 +762,7 @@ class BackgroundManager {
    */
   async saveSettings() {
     try {
-      await chrome.storage.local.set({
+      await storage.set({
         isRandomMode: this.isRandomMode,
         fixedImage: this.fixedImage,
       });
@@ -707,7 +870,7 @@ class BookmarkManager {
    */
   async loadBookmarks() {
     try {
-      const result = await chrome.storage.local.get(['bookmarks']);
+      const result = await storage.get(['bookmarks']);
       this.bookmarks = result.bookmarks || this.getDefaultBookmarks();
     } catch (error) {
       console.error('Failed to load bookmarks:', error);
@@ -733,7 +896,7 @@ class BookmarkManager {
    */
   async saveBookmarks() {
     try {
-      await chrome.storage.local.set({ bookmarks: this.bookmarks });
+      await storage.set({ bookmarks: this.bookmarks });
     } catch (error) {
       console.error('Failed to save bookmarks:', error);
     }
@@ -1422,6 +1585,19 @@ class CalendarManager {
     this.events = [];
 
     /**
+     * 읽기가 실패했는가.
+     *
+     * 이 플래그가 서면 `this.events`(빈 배열)는 **저장된 내용이 아니다.**
+     * 그대로 두면 addEvent()가 `this.events.concat(event)` = `[한 건]`을 커밋해
+     * 저장돼 있던 일정을 전부 지운다. 그래서 서 있는 동안 쓰기를 막는다.
+     *
+     * 예외는 가져오기 하나뿐이다 — 전체 교체라 읽기 성공에 의존하지 않고,
+     * 읽기가 영구히 깨졌을 때 사용자에게 남은 유일한 복구 수단이다.
+     * @type {boolean}
+     */
+    this.loadFailed = false;
+
+    /**
      * 렌더 창(42칸)에 걸친 이벤트만 담는 날짜 버킷. renderGrid()가 매 렌더마다 새로 만든다.
      *
      * 전역으로 범위를 날짜 전개하면 최악의 경우 `이벤트 수 × 범위 일수`만큼
@@ -1865,18 +2041,36 @@ class CalendarManager {
 
   /**
    * 이벤트 목록 로드
+   *
+   * 실패하면 **빈 목록으로 강등하지 않는다.** 예전에는 catch가 `this.events = []`를
+   * 정상 상태로 만들었고, 그 뒤 할 일을 하나만 추가해도 `[한 건]`이 커밋되어
+   * 저장돼 있던 일정이 전부 사라졌다. 지금은 loadFailed를 세워 쓰기를 막는다.
+   * @returns {Promise<boolean>} 로드 성공 여부
    */
   async loadEvents() {
     try {
-      const result = await chrome.storage.local.get(['calendarEvents']);
-      const raw = Array.isArray(result.calendarEvents) ? result.calendarEvents : [];
+      const result = await storage.get(['calendarEvents']);
+      const stored = result.calendarEvents;
+
+      // 값이 없는 것(첫 실행)과 배열이 아닌 것(손상)은 다르다. 후자를 조용히
+      // 빈 배열로 바꾸면 reject 없이 같은 소실 경로로 들어간다.
+      if (stored !== undefined && !Array.isArray(stored)) {
+        throw new Error('저장된 일정 형식이 올바르지 않습니다 (배열이 아님)');
+      }
+
       // 마이그레이션이 실패했거나(스토리지 오류) 구버전이 쓴 값이 남아 있어도
       // 메모리에는 항상 v3 한 가지 형태만 둔다. 렌더 경로가 필드 유무를 검사하지
       // 않아도 되게 하려면 형태가 갈라지는 지점이 없어야 한다.
+      const raw = stored || [];
       this.events = raw.map((event) => createCalendarEvent(event)).filter((event) => event !== null);
+      this.loadFailed = false;
+      this.hideError();
+      return true;
     } catch (error) {
       console.error('Failed to load calendar events:', error);
-      this.events = [];
+      this.loadFailed = true;
+      this.showError('할 일을 불러오지 못했습니다. 저장이 잠겨 있습니다 — 다시 시도해 주세요.');
+      return false;
     }
     // 인덱스는 renderGrid()가 렌더 창을 알게 된 뒤에 만든다.
   }
@@ -1932,21 +2126,33 @@ class CalendarManager {
    * 스냅샷을 커밋하는 것을 막는다.
    *
    * @param {CalendarEvent[]} nextEvents - 새 배열 (기존 배열 in-place 변형 금지)
+   * @param {{isFullReplacement?: boolean}} [options] - 전체 교체(가져오기)는
+   *   loadFailed 잠금을 통과한다. 기존 목록에서 파생되지 않으므로 읽기 성공에
+   *   의존하지 않고, 읽기가 영구히 깨졌을 때 유일한 복구 수단이다.
    * @returns {Promise<boolean>} 커밋 성공 여부
    */
-  async persistEvents(nextEvents) {
+  async persistEvents(nextEvents, options) {
     if (this.pending) return false;
+
+    // 읽기가 실패한 상태의 this.events는 저장된 내용이 아니다. 거기서 파생된
+    // 쓰기는 남아 있는 일정을 지운다.
+    if (this.loadFailed && !(options && options.isFullReplacement)) {
+      this.showError('할 일을 불러오지 못해 저장이 잠겨 있습니다. 다시 시도하거나 파일에서 가져오세요.');
+      return false;
+    }
 
     const opToken = ++this.opSeq;
     this.pending = { nextEvents, opToken };
     this.setPendingState(true);
 
     try {
-      await chrome.storage.local.set({ calendarEvents: nextEvents });
+      await storage.set({ calendarEvents: nextEvents });
       if (opToken !== this.opSeq) return false;
 
       this.events = nextEvents;
       this.pending = null;
+      // 전체 교체가 성공했다면 저장소 내용이 확정됐다 — 잠금을 푼다.
+      this.loadFailed = false;
       this.setPendingState(false);
       this.hideError();
       this.render();
@@ -1961,6 +2167,22 @@ class CalendarManager {
       this.showError('할 일을 저장하지 못했습니다. 변경 사항은 적용되지 않았습니다.');
       return false;
     }
+  }
+
+  /**
+   * 배너의 "다시 시도" — 무엇을 재시도할지는 실패 종류가 정한다
+   *
+   * 버튼은 하나인데 실패는 둘이다. 읽기 실패가 우선한다 — 그 상태에서 쓰기를
+   * 재시도해 봐야 persistEvents()가 잠금에 걸려 즉시 false를 반환하고,
+   * 아무 일도 안 하는 버튼이 된다.
+   */
+  async retryFailedOperation() {
+    if (this.loadFailed) {
+      const ok = await this.loadEvents();
+      if (ok) this.render();
+      return;
+    }
+    await this.retryPersist();
   }
 
   /**
@@ -1992,6 +2214,9 @@ class CalendarManager {
     if (!this.errorElement || !this.errorTextElement) return;
     this.errorTextElement.textContent = message;
     this.errorElement.hidden = false;
+    // 배너는 오버레이라 자리를 차지하지 않는다. 다만 할 일 입력 폼은 가리면
+    // 안 되므로(재입력 수단이다) 패널만 그만큼 비켜준다 — CSS가 처리한다.
+    this.root.classList.add('has-error');
   }
 
   /**
@@ -2000,6 +2225,7 @@ class CalendarManager {
   hideError() {
     if (!this.errorElement) return;
     this.errorElement.hidden = true;
+    this.root.classList.remove('has-error');
   }
 
   /**
@@ -2063,19 +2289,38 @@ class CalendarManager {
 
   /**
    * 전체 이벤트 교체 (가져오기)
+   *
+   * loadFailed 잠금을 통과하는 유일한 쓰기다. 기존 목록에서 파생되지 않으므로
+   * 읽기 실패가 오염시킬 것이 없고, 읽기가 영구히 깨졌을 때(손상된 저장값)
+   * 사용자에게 남은 유일한 복구 경로다.
    * @param {CalendarEvent[]} nextEvents
    * @returns {Promise<boolean>}
    */
   async replaceEvents(nextEvents) {
-    return this.persistEvents(nextEvents);
+    return this.persistEvents(nextEvents, { isFullReplacement: true });
   }
 
   /**
    * 현재 이벤트 목록 반환 (내보내기용)
+   *
+   * 복사본을 준다. 내부 배열을 그대로 넘기면 호출자가 in-place로 변형해
+   * persistEvents()를 우회한 채 메모리와 저장소를 어긋나게 할 수 있다.
+   * 항목까지 얕게 복사해 이벤트 객체 필드 변형도 막는다.
    * @returns {CalendarEvent[]}
    */
   getEvents() {
-    return this.events;
+    return this.events.map((event) => ({ ...event }));
+  }
+
+  /**
+   * 내보내도 되는 상태인가
+   *
+   * 읽기가 실패한 상태에서 내보내면 빈 파일이 만들어져, 사용자가 그것을
+   * 백업이라고 믿게 된다.
+   * @returns {boolean}
+   */
+  canExport() {
+    return !this.loadFailed;
   }
 
   /**
@@ -2175,7 +2420,7 @@ class CalendarManager {
 
     // 저장 실패 재시도
     if (this.errorRetryButton) {
-      this.errorRetryButton.addEventListener('click', () => this.retryPersist());
+      this.errorRetryButton.addEventListener('click', () => this.retryFailedOperation());
     }
 
     // Esc로 패널 닫기
@@ -2977,7 +3222,7 @@ class SettingsManager {
 
     // 위젯 표시 설정
     try {
-      const result = await chrome.storage.local.get([
+      const result = await storage.get([
         'widgetType',
         'mainWidgetEnabled',
         'mainWidgetPosition',
@@ -3025,7 +3270,7 @@ class SettingsManager {
 
     // 블러 설정
     try {
-      const result = await chrome.storage.local.get(['blurEnabled', 'overlayBrightness']);
+      const result = await storage.get(['blurEnabled', 'overlayBrightness']);
 
       const blurEnabled = result.blurEnabled !== false; // 기본값 true
       const overlayBrightness = result.overlayBrightness !== undefined ? result.overlayBrightness : 50;
@@ -3170,7 +3415,7 @@ class SettingsManager {
    */
   async saveBlurSetting(enabled) {
     try {
-      await chrome.storage.local.set({ blurEnabled: enabled });
+      await storage.set({ blurEnabled: enabled });
     } catch (error) {
       console.error('Failed to save blur setting:', error);
     }
@@ -3182,7 +3427,7 @@ class SettingsManager {
    */
   async saveBrightnessSetting(brightness) {
     try {
-      await chrome.storage.local.set({ overlayBrightness: brightness });
+      await storage.set({ overlayBrightness: brightness });
     } catch (error) {
       console.error('Failed to save brightness setting:', error);
     }
@@ -3251,7 +3496,7 @@ class SettingsManager {
    */
   async saveWidgetSetting(enabled) {
     try {
-      await chrome.storage.local.set({ mainWidgetEnabled: enabled });
+      await storage.set({ mainWidgetEnabled: enabled });
     } catch (error) {
       console.error('Failed to save widget setting:', error);
     }
@@ -3263,7 +3508,7 @@ class SettingsManager {
    */
   async saveWidgetType(type) {
     try {
-      await chrome.storage.local.set({ widgetType: type });
+      await storage.set({ widgetType: type });
     } catch (error) {
       console.error('Failed to save widget type:', error);
     }
@@ -3275,7 +3520,7 @@ class SettingsManager {
    */
   async saveSearchSetting(enabled) {
     try {
-      await chrome.storage.local.set({ searchEnabled: enabled });
+      await storage.set({ searchEnabled: enabled });
     } catch (error) {
       console.error('Failed to save search setting:', error);
     }
@@ -3582,7 +3827,7 @@ class SettingsManager {
 
     this.searchWidthByWidget = { ...this.searchWidthByWidget, [this.widgetType]: width };
     try {
-      await chrome.storage.local.set({ searchWidthByWidget: this.searchWidthByWidget });
+      await storage.set({ searchWidthByWidget: this.searchWidthByWidget });
     } catch (error) {
       console.error('Failed to save search width:', error);
     }
@@ -3605,7 +3850,7 @@ class SettingsManager {
     if (this.widgetType !== 'clock') return null;
 
     try {
-      const result = await chrome.storage.local.get(['searchWidth']);
+      const result = await storage.get(['searchWidth']);
       return typeof result.searchWidth === 'number' && result.searchWidth > 0 ? result.searchWidth : null;
     } catch (error) {
       console.error('Failed to load search width:', error);
@@ -3749,7 +3994,7 @@ class SettingsManager {
   async savePositionSettings() {
     try {
       // 레거시 clockPosition은 건드리지 않는다 (다운그레이드 안전성)
-      await chrome.storage.local.set({
+      await storage.set({
         mainWidgetPosition: this.widgetPosition,
         searchPosition: this.searchPosition,
       });
@@ -3775,6 +4020,17 @@ class SettingsManager {
    */
   handleCalendarExport() {
     if (!this.calendarManager) return;
+
+    // 읽기가 실패한 상태에서 내보내면 빈 파일이 나온다. 사용자는 그것을
+    // 백업이라고 믿고 원본을 덮어쓸 수 있다.
+    if (!this.calendarManager.canExport()) {
+      const statusElement = document.getElementById('calendarImportStatus');
+      if (statusElement) {
+        statusElement.textContent =
+          '할 일을 불러오지 못한 상태라 내보낼 수 없습니다. 달력의 "다시 시도"를 먼저 눌러 주세요.';
+      }
+      return;
+    }
 
     const json = JSON.stringify(this.calendarManager.getEvents(), null, 2);
     const blob = new Blob([json], { type: 'application/json' });
@@ -3841,8 +4097,12 @@ class Application {
     // 매니저 내부에서 돌리면 다른 매니저가 복사 이전 값을 읽는 경합이 생긴다.
     // v3는 calendarEvents와 searchWidthByWidget을 건드리므로 CalendarManager /
     // SettingsManager 생성보다 반드시 앞서야 한다.
-    await migrateSettingsToV2();
-    await migrateCalendarToV3();
+    const v2Ok = await migrateSettingsToV2();
+    const v3Ok = await migrateCalendarToV3();
+
+    // 저장소가 확장이 아니거나 마이그레이션이 실패했다면 화면으로 말한다.
+    // body가 존재하는 이 시점이 dataset을 세울 수 있는 가장 이른 지점이다.
+    applyStorageNotice({ migrationFailed: !v2Ok || !v3Ok });
 
     // DOM 요소 가져오기
     const timeElement = document.getElementById('time');

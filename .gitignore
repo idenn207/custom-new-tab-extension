@@ -6,4 +6,8 @@
 .claude/notes/
 .claude/worktrees/
 
+# Playwright MCP가 남기는 스냅샷·콘솔 로그·스크린샷. 재생성 가능하다.
+.playwright-mcp/
+/banner-overlay.png
+
 # 계획·리뷰 기록·PRD·리포트는 산출물이므로 추적한다.
