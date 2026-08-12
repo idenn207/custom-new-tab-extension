@@ -305,42 +305,57 @@
           </svg>
         </button>
         <button type="button" class="calendar-today" data-nav="today">오늘</button>
+
+        <!--
+          요약 한 줄은 JS가 이 앞에 넣고 뺀다. 마감도 지연도 없으면 노드 자체가
+          없어야 하므로 빈 자리표시자를 두지 않는다.
+        -->
+        <button type="button" class="calendar-detail-add" data-nav="detail">일정 추가</button>
       </div>
 
-      <div class="calendar-weekdays" aria-hidden="true">
-        <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
-      </div>
+      <!--
+        밴드 본문. 그리드와 할 일 패널을 2열로 나란히 둔다.
+        패널을 아래로 쌓으면 밴드 높이가 두 배가 되어 "배경이 주인공" 원칙과 부딪힌다.
+        좁은 화면에서는 CSS가 1열로 되돌린다.
+      -->
+      <div class="calendar-body">
+        <div class="calendar-month">
+          <div class="calendar-weekdays" aria-hidden="true">
+            <span>일</span><span>월</span><span>화</span><span>수</span><span>목</span><span>금</span><span>토</span>
+          </div>
 
-      <div class="calendar-grid" id="calendarGrid" role="grid" aria-labelledby="calendarTitle">
-        <!-- JavaScript로 동적 생성 -->
-      </div>
-
-      <div class="calendar-panel" id="calendarPanel" hidden>
-        <div class="calendar-panel-header">
-          <h3 class="calendar-panel-title" id="calendarPanelTitle"></h3>
-          <button type="button" class="calendar-panel-close" aria-label="할 일 패널 닫기">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-              stroke-linecap="round" aria-hidden="true">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-          </button>
+          <div class="calendar-grid" id="calendarGrid" role="grid" aria-labelledby="calendarTitle">
+            <!-- JavaScript로 동적 생성 -->
+          </div>
         </div>
-        <ul class="calendar-todo-list" id="calendarTodoList" aria-labelledby="calendarPanelTitle">
-          <!-- JavaScript로 동적 생성 -->
-        </ul>
-        <form class="calendar-todo-form" id="calendarTodoForm">
-          <input type="text" class="calendar-todo-input" id="calendarTodoInput" placeholder="마감할 일 입력 후 Enter"
-            maxlength="500" autocomplete="off">
-          <button type="submit" class="calendar-todo-add" aria-label="할 일 추가">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-              stroke-linecap="round" aria-hidden="true">
-              <line x1="12" y1="5" x2="12" y2="19"></line>
-              <line x1="5" y1="12" x2="19" y2="12"></line>
-            </svg>
-          </button>
-        </form>
-      </div>
+
+        <div class="calendar-panel" id="calendarPanel" hidden>
+          <div class="calendar-panel-header">
+            <h3 class="calendar-panel-title" id="calendarPanelTitle"></h3>
+            <button type="button" class="calendar-panel-close" aria-label="할 일 패널 닫기">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" aria-hidden="true">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
+          <ul class="calendar-todo-list" id="calendarTodoList" aria-labelledby="calendarPanelTitle">
+            <!-- JavaScript로 동적 생성 -->
+          </ul>
+          <form class="calendar-todo-form" id="calendarTodoForm">
+            <input type="text" class="calendar-todo-input" id="calendarTodoInput" placeholder="마감할 일 입력 후 Enter"
+              maxlength="500" autocomplete="off">
+            <button type="submit" class="calendar-todo-add" aria-label="할 일 추가">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                stroke-linecap="round" aria-hidden="true">
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+            </button>
+          </form>
+        </div>
+      </div><!-- /.calendar-body -->
 
       <div class="calendar-error" id="calendarError" role="alert" hidden>
         <span class="calendar-error-text" id="calendarErrorText"></span>
@@ -372,6 +387,65 @@
         <div class="modal-buttons">
           <button type="submit" class="btn-primary">추가</button>
           <button type="button" class="btn-secondary" id="cancelBtn">취소</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!--
+    일정 상세 (범위 · 중요도 · 작업 메모)
+
+    간편 입력(패널의 한 줄 입력)으로 못 담는 것만 여기서 받는다. 모달을 먼저 꺼내지
+    않고 인라인 경로를 기본으로 두는 순서다.
+  -->
+  <div class="modal" id="calendarEventModal">
+    <div class="modal-content calendar-event-modal" role="dialog" aria-modal="true"
+      aria-labelledby="calendarEventModalTitle">
+      <h3 id="calendarEventModalTitle">일정 추가</h3>
+      <form id="calendarEventForm">
+        <label class="field-label" for="calendarEventTitle">제목</label>
+        <input type="text" id="calendarEventTitle" maxlength="500" autocomplete="off" required>
+
+        <div class="field-row">
+          <div class="field-col">
+            <label class="field-label" for="calendarEventStart">시작일</label>
+            <input type="date" id="calendarEventStart" required>
+          </div>
+          <div class="field-col">
+            <label class="field-label" for="calendarEventEnd">종료일</label>
+            <input type="date" id="calendarEventEnd" required>
+          </div>
+        </div>
+
+        <fieldset class="field-group">
+          <legend class="field-label">중요도</legend>
+          <div class="priority-segment" id="calendarEventPriority">
+            <label class="priority-option">
+              <input type="radio" name="calendarEventPriority" value="low">
+              <span>보통 이하</span>
+            </label>
+            <label class="priority-option">
+              <input type="radio" name="calendarEventPriority" value="normal" checked>
+              <span>보통</span>
+            </label>
+            <label class="priority-option">
+              <input type="radio" name="calendarEventPriority" value="high">
+              <span>중요</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <label class="field-label" for="calendarEventNote">작업 메모</label>
+        <textarea id="calendarEventNote" maxlength="2000" rows="4"
+          placeholder="진행 상황이나 남은 일을 적어 두세요"></textarea>
+        <p class="field-hint" id="calendarEventNoteCount" aria-live="polite"></p>
+
+        <p class="field-error" id="calendarEventError" role="alert" hidden></p>
+
+        <div class="modal-buttons">
+          <button type="submit" class="btn-primary">일정 저장</button>
+          <button type="button" class="btn-secondary" id="calendarEventCancel">변경 취소</button>
+          <button type="button" class="btn-danger" id="calendarEventDelete" hidden>일정 삭제</button>
         </div>
       </form>
     </div>

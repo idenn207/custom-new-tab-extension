@@ -75,7 +75,7 @@ We'll know we're right when **새 탭 진입 시점에 (a) 오늘 마감·지연
 
 | # | Milestone | Outcome | Status | Plan |
 |---|---|---|---|---|
-| 1 | 전체 너비 업무 캘린더 | 달력 모드를 켜면 위치 설정 없이 화면 전체 너비로 상시 표시되고, 범위 일정·중요도 색상·간편/상세 입력(메모 포함)·요약 배너가 동작한다. 새 탭을 여는 순간 오늘 마감과 지연이 클릭 없이 읽힌다 | pending | — |
+| 1 | 전체 너비 업무 캘린더 | 달력 모드를 켜면 위치 설정 없이 화면 전체 너비로 상시 표시되고, 범위 일정·중요도 색상·간편/상세 입력(메모 포함)·요약 배너가 동작한다. 새 탭을 여는 순간 오늘 마감과 지연이 클릭 없이 읽힌다 | complete | `.claude/plans/calendar-widget-v2.plan.md` · 리포트 `.claude/PRPs/reports/calendar-widget-v2-report.md` |
 | 2 | 새 탭을 열지 않아도 상기된다 | 마감이 임박한 항목이 브라우저 알림으로 전달된다. 권한 증가와 심사 영향을 감수할 가치가 있는지 M1 실사용 데이터로 판단한 뒤 착수한다 | pending | — |
 | 3 | 기존 일정이 새 탭에 보인다 | Google Calendar의 all-day 일정이 읽기 전용으로 표시되어, 두 곳에 적을 필요가 없어진다 | pending | — |
 
@@ -137,5 +137,7 @@ We'll know we're right when **새 탭 진입 시점에 (a) 오늘 마감·지연
 > 이번 변경은 `PRODUCT.md`/`DESIGN.md`의 갱신을 유발할 가능성이 높다 — Open Question "밀도 vs 배경"이 어느 쪽으로 결정되든 문서에 반영되어야 한다. `system` 단계의 `/impeccable document`가 그 지점이다.
 
 ---
-*Status: DRAFT — requirements only. Implementation planning pending via /mccp:plan.*
+*Status: M1 구현 완료 (커밋·PR 전). M2·M3는 pending — M1 dogfooding 결과로 범위를 재결정한다.*
+*중요도는 "색상"이 아니라 **칩 두께 3단계 + 기존 hue의 알파 단계**로 구현했다. 새 hue를 더하면 한 화면에 6계열이 되어 `PRODUCT.md` anti-reference에 걸린다 (계획 Task 6).*
+*Open Questions 중 위치 설정 UI(숨김 + 저장값 보존)와 기존 M1 데이터 승격(시작일=종료일, `date` 잔존)은 구현으로 해소됐다. 메모 저장 한계는 단일 키 유지 + 2000자 상한 + 가져오기 총량 상한으로 정했다.*
 *Co-created with user on 2026-08-09.*

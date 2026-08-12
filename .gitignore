@@ -1,0 +1,9 @@
+# mccp 게이트의 세션·머신 로컬 산출물.
+# 저장소 절대 경로와 세션 ID가 들어 있어 커밋하지 않는다.
+.claude/state/
+.claude/cache/
+.claude/receipts/
+.claude/notes/
+.claude/worktrees/
+
+# 계획·리뷰 기록·PRD·리포트는 산출물이므로 추적한다.

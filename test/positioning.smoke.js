@@ -247,6 +247,62 @@ async function runPositionMatrix(collector, widgetType) {
 }
 
 /**
+ * 달력 밴드의 **위치 불변식** — 81조합에서 밴드 rect가 하나여야 한다
+ *
+ * 달력에는 더 이상 위치가 없으므로 matrix/calendar/** 81건을 스냅샷으로 남기는 것은
+ * 회귀 탐지에 도움이 되지 않는다. 81건이 전부 같은 값이라, 무언가 깨져도 diff가
+ * 81줄로 번져 원인을 가린다. 대신 "무엇이 참이어야 하는가"를 한 건으로 적는다.
+ *
+ * 함께 확인하는 것: 검색창이 top-* 일 때 밴드와 겹치지 않는다 (DD3).
+ * @param {ReturnType<typeof createCollector>} collector
+ */
+async function runBandInvariance(collector) {
+  const frameWindow = await loadApp({
+    widgetType: 'calendar',
+    settingsVersion: 3,
+    mainWidgetEnabled: true,
+    searchEnabled: true,
+  });
+  const settings = frameWindow['__newTabApp'].settingsManager;
+
+  /** @type {Set<string>} */
+  const bandRects = new Set();
+  /** @type {Set<string>} */
+  const intersectionsBySearchPosition = new Set();
+  let samples = 0;
+
+  for (const widgetPosition of POSITIONS) {
+    await settings.handleWidgetPositionChange(widgetPosition);
+    for (const searchPosition of POSITIONS) {
+      await settings.handleSearchPositionChange(searchPosition);
+      await settle();
+
+      const shot = snapshot(frameWindow);
+      bandRects.add(shot.calendar ? String(shot.calendar.rect) : 'null');
+      intersectionsBySearchPosition.add(`${searchPosition}=${shot.intersects}`);
+      samples += 1;
+      progress(`band invariance: ${widgetPosition} × ${searchPosition}`);
+    }
+  }
+
+  const distinctRects = Array.from(bandRects).sort();
+  collector.add(
+    'matrix/calendar/band-invariance',
+    {
+      samples,
+      distinctBandRects: distinctRects,
+      // 핵심 단언 — 위젯 위치 9종을 바꿔도 밴드는 움직이지 않는다
+      bandRectIsInvariant: distinctRects.length === 1,
+      // 상단 검색창은 밴드 아래로 비켜야 한다. 'top-*=true'가 하나라도 있으면 실패다
+      topSearchIntersections: Array.from(intersectionsBySearchPosition)
+        .filter((entry) => entry.startsWith('top-'))
+        .sort(),
+    },
+    capturedErrors
+  );
+}
+
+/**
  * 위젯 ON/OFF × 검색창 ON/OFF 4조합 (위젯 타입별)
  * @param {ReturnType<typeof createCollector>} collector
  * @param {'clock'|'calendar'} widgetType
@@ -319,7 +375,7 @@ async function runDynamicCases(collector) {
   collector.add('dynamic/05-panel-open', snapshot(frameWindow), capturedErrors);
 
   // 할 일 추가 → 삭제 (이벤트 개수 변화)
-  await calendar.addEvent(todayKey, '스모크 하네스 항목');
+  await calendar.addEvent({ startDate: todayKey, endDate: todayKey, title: '스모크 하네스 항목' });
   await settle();
   collector.add('dynamic/06-todo-added', snapshot(frameWindow), capturedErrors);
 
@@ -411,6 +467,196 @@ async function runMigrationCases(collector) {
 }
 
 /**
+ * 달력 v3 마이그레이션 — 단일 날짜 승격 / date 잔존 / 340px 캐시 정리 / 2회 멱등
+ * @param {ReturnType<typeof createCollector>} collector
+ */
+async function runCalendarV3MigrationCases(collector) {
+  const frameWindow = await loadApp({
+    settingsVersion: 2,
+    widgetType: 'calendar',
+    mainWidgetEnabled: true,
+    searchEnabled: true,
+    // M1 시절 340px 카드 폭이 캐시로 남아 있는 상태
+    searchWidthByWidget: { clock: 420, calendar: 340 },
+    calendarEvents: [
+      { id: 'evt-1', date: '2026-08-06', title: '단일 날짜', done: false, createdAt: 1, source: 'local', externalId: null },
+      { id: 'evt-2', date: '2026-08-20', title: '완료 항목', done: true, createdAt: 2, source: 'local', externalId: null },
+    ],
+  });
+
+  const first = await chrome.storage.local.get(['settingsVersion', 'calendarEvents', 'searchWidthByWidget']);
+  const promoted = Array.isArray(first.calendarEvents) ? first.calendarEvents : [];
+  const widths = first.searchWidthByWidget || {};
+
+  collector.add(
+    'migration-v3/01-promote',
+    {
+      settingsVersion: first.settingsVersion,
+      count: promoted.length,
+      promotedRanges: promoted.map((event) => `${event.startDate}~${event.endDate}`),
+      // DD6 — date를 지우지 않아야 M1 코드로 롤백해도 달력이 그대로 렌더된다
+      legacyDatePreserved: promoted.every((event) => event.date === event.startDate),
+      fields: promoted.length > 0 ? Object.keys(promoted[0]).sort().join(',') : '',
+      donePreserved: promoted.map((event) => event.done),
+      // 밴드 모드에서 첫 페인트에 340px가 물리는 것을 막는 정리
+      calendarWidthCacheCleared: widths.calendar === undefined,
+      clockWidthPreserved: widths.clock,
+    },
+    capturedErrors
+  );
+
+  // 사용자가 note/priority를 채운 뒤 마이그레이션이 다시 돌아도 지워지면 안 된다
+  const withUserData = promoted.map((event) => ({ ...event, note: '사용자 메모', priority: 'high' }));
+  await chrome.storage.local.set({ calendarEvents: withUserData, settingsVersion: 2 });
+  await frameWindow.migrateCalendarToV3();
+  await frameWindow.migrateCalendarToV3();
+
+  const second = await chrome.storage.local.get(['settingsVersion', 'calendarEvents']);
+  const reRun = Array.isArray(second.calendarEvents) ? second.calendarEvents : [];
+  collector.add('migration-v3/02-idempotent', {
+    settingsVersion: second.settingsVersion,
+    count: reRun.length,
+    notesPreserved: reRun.every((event) => event.note === '사용자 메모'),
+    prioritiesPreserved: reRun.every((event) => event.priority === 'high'),
+  });
+
+  progress('calendar v3 migration cases 완료');
+}
+
+/**
+ * 범위 이벤트 — 월 경계 / 범위 상한 / 메모 절단 / 앞뒤 역전
+ * @param {ReturnType<typeof createCollector>} collector
+ */
+async function runRangeCases(collector) {
+  const frameWindow = await loadApp({
+    settingsVersion: 3,
+    widgetType: 'calendar',
+    mainWidgetEnabled: true,
+    searchEnabled: true,
+    calendarEvents: [],
+  });
+  const calendar = frameWindow['__newTabApp'].calendarManager;
+
+  /**
+   * 지정한 달을 그린 뒤 칩이 붙은 날짜를 모은다
+   * @param {number} year
+   * @param {number} month
+   * @returns {string[]}
+   */
+  const chipDatesFor = (year, month) => {
+    calendar.viewYear = year;
+    calendar.viewMonth = month;
+    calendar.render();
+    return Array.from(frameWindow.document.querySelectorAll('.calendar-day'))
+      .filter((cell) => cell.querySelector('.calendar-chip'))
+      .map((cell) => cell.dataset.date)
+      .sort();
+  };
+
+  // 월 경계를 넘는 범위 (1/28 ~ 2/3)
+  await calendar.addEvent({ startDate: '2026-01-28', endDate: '2026-02-03', title: '월 경계 범위' });
+  const january = chipDatesFor(2026, 0);
+  const february = chipDatesFor(2026, 1);
+
+  collector.add(
+    'range/01-month-boundary',
+    {
+      januaryChipDates: january,
+      februaryChipDates: february,
+      // 1월 뷰와 2월 뷰 양쪽에서 보여야 한다
+      visibleInBothMonths: january.length > 0 && february.length > 0,
+      distinctDates: Array.from(new Set(january.concat(february))).sort(),
+    },
+    capturedErrors
+  );
+
+  // 범위 상한 — 366일을 넘기면 잘려서 저장된다
+  await calendar.addEvent({ startDate: '2026-03-01', endDate: '2030-03-01', title: '과도한 범위' });
+  const clamped = calendar.getEvents().find((event) => event.title === '과도한 범위');
+  collector.add('range/02-max-span', {
+    startDate: clamped ? clamped.startDate : null,
+    endDate: clamped ? clamped.endDate : null,
+    spanDays: clamped ? frameWindow.spanDays(clamped.startDate, clamped.endDate) : null,
+  });
+
+  // 메모 길이 절단
+  await calendar.addEvent({
+    startDate: '2026-03-05',
+    endDate: '2026-03-05',
+    title: '메모 절단',
+    note: 'ㄱ'.repeat(2500),
+  });
+  const noted = calendar.getEvents().find((event) => event.title === '메모 절단');
+  collector.add('range/03-note-truncated', {
+    noteLength: noted ? noted.note.length : null,
+    truncatedToMax: Boolean(noted && noted.note.length === 2000),
+  });
+
+  // 종료일이 시작일보다 빠르면 시작일로 접힌다
+  await calendar.addEvent({ startDate: '2026-04-10', endDate: '2026-04-01', title: '역전 범위' });
+  const reversed = calendar.getEvents().find((event) => event.title === '역전 범위');
+  collector.add('range/04-reversed', {
+    startDate: reversed ? reversed.startDate : null,
+    endDate: reversed ? reversed.endDate : null,
+    collapsedToStart: Boolean(reversed && reversed.startDate === reversed.endDate),
+  });
+
+  progress('range cases 완료');
+}
+
+/**
+ * 요약 한 줄의 생명주기 — 셀 것이 없으면 노드 자체가 없어야 한다 (DD1)
+ *
+ * 날짜는 전부 오늘 기준 상대값으로 만든다. 고정 날짜를 쓰면 하네스를 돌리는 날에
+ * 따라 같은 항목이 '미래'였다가 '지연'이 되어 케이스가 저절로 뒤집힌다.
+ * @param {ReturnType<typeof createCollector>} collector
+ */
+async function runSummaryCases(collector) {
+  const frameWindow = await loadApp({
+    settingsVersion: 3,
+    widgetType: 'calendar',
+    mainWidgetEnabled: true,
+    searchEnabled: true,
+    calendarEvents: [],
+  });
+  const doc = frameWindow.document;
+  const calendar = frameWindow['__newTabApp'].calendarManager;
+
+  const absentWhenEmpty = doc.querySelector('.calendar-summary') === null;
+
+  // 먼 미래 항목만 있으면 여전히 셀 것이 없다
+  const futureKey = frameWindow.shiftDateKey(calendar.todayKey, 30);
+  await calendar.addEvent({ startDate: futureKey, endDate: futureKey, title: '먼 미래' });
+  const absentWithFutureOnly = doc.querySelector('.calendar-summary') === null;
+
+  // 오늘 마감 + 지연을 만들면 한 줄이 나타난다
+  await calendar.addEvent({ startDate: calendar.todayKey, endDate: calendar.todayKey, title: '오늘 마감' });
+  const overdueKey = frameWindow.shiftDateKey(calendar.todayKey, -3);
+  await calendar.addEvent({ startDate: overdueKey, endDate: overdueKey, title: '지연 항목' });
+
+  const withDue = doc.querySelector('.calendar-summary');
+
+  // 전부 완료하면 다시 사라진다
+  for (const event of calendar.getEvents().slice()) {
+    if (!event.done) await calendar.toggleEvent(event.id);
+  }
+
+  collector.add(
+    'summary/01-lifecycle',
+    {
+      absentWhenEmpty,
+      absentWithFutureOnly,
+      presentWhenDue: withDue !== null,
+      dueText: withDue ? withDue.textContent : null,
+      absentAfterAllDone: doc.querySelector('.calendar-summary') === null,
+    },
+    capturedErrors
+  );
+
+  progress('summary cases 완료');
+}
+
+/**
  * 날짜 키 헬퍼 테이블 테스트
  * @param {ReturnType<typeof createCollector>} collector
  */
@@ -485,6 +731,39 @@ async function runSanitizeCases(collector) {
     })(),
   });
 
+  // v3 필드 — 거짓 date / 존재하지 않는 endDate / 알 수 없는 중요도 / v2 형식 혼재
+  const v3Payload = JSON.parse(
+    '[{"startDate":"2026-08-10","endDate":"2026-08-12","date":"1970-01-01","title":"거짓 date"},' +
+      '{"startDate":"2026-08-01","endDate":"2026-08-32","title":"없는 endDate"},' +
+      '{"startDate":"2026-09-01","endDate":"2026-09-02","title":"이상한 중요도","priority":"URGENT"},' +
+      '{"startDate":"2026-09-10","endDate":"2026-09-11","title":"정상 중요도","priority":"high"},' +
+      '{"date":"2026-10-05","title":"v2 형식"}]'
+  );
+  const v3Sanitized = sanitizeImportedEvents(v3Payload);
+  const byTitle = (title) => v3Sanitized.find((event) => event.title === title);
+
+  collector.add('sanitize/v3-fields', {
+    kept: v3Sanitized.length,
+    // date는 언제나 검증된 startDate에서 파생된다. 입력의 거짓 date를 따라가면
+    // 인덱스가 엉뚱한 날짜에 이벤트를 밀어 넣어 화면에서 사라진다
+    dateAlwaysDerivedFromStart: v3Sanitized.every((event) => event.date === event.startDate),
+    liarDateRewritten: (() => {
+      const event = byTitle('거짓 date');
+      return Boolean(event && event.date === '2026-08-10');
+    })(),
+    // '2026-08-32'는 형식만 맞고 존재하지 않는 날이다. 왕복 검증이 걸러 startDate로 접힌다
+    invalidEndDateCollapsed: (() => {
+      const event = byTitle('없는 endDate');
+      return Boolean(event && event.endDate === '2026-08-01');
+    })(),
+    priorities: v3Sanitized.map((event) => `${event.title}=${event.priority}`),
+    v2Promoted: (() => {
+      const event = byTitle('v2 형식');
+      return Boolean(event && event.startDate === '2026-10-05' && event.endDate === '2026-10-05');
+    })(),
+    fields: v3Sanitized.length > 0 ? Object.keys(v3Sanitized[0]).sort().join(',') : '',
+  });
+
   progress('sanitize cases 완료');
 }
 
@@ -507,12 +786,17 @@ async function runAll() {
 
   const collector = createCollector();
   try {
+    // 시계는 81조합 스냅샷 그대로 — 이 경로는 이번 변경에서 diff 0이어야 한다 (UI4).
     await runPositionMatrix(collector, 'clock');
-    await runPositionMatrix(collector, 'calendar');
+    // 달력은 위치가 없어졌다. 81건 스냅샷 대신 불변식 한 건으로 바뀐다.
+    await runBandInvariance(collector);
     await runToggleMatrix(collector, 'clock');
     await runToggleMatrix(collector, 'calendar');
     await runDynamicCases(collector);
     await runMigrationCases(collector);
+    await runCalendarV3MigrationCases(collector);
+    await runRangeCases(collector);
+    await runSummaryCases(collector);
     await runDateKeyCases(collector);
     await runSanitizeCases(collector);
   } finally {

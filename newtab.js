@@ -9,28 +9,81 @@
  * 책임: UI 상호작용 및 비즈니스 로직 처리 (단일 책임 원칙 준수)
  */
 
-/** 설정 스키마 버전. 마이그레이션 멱등성 마커 */
-const SETTINGS_VERSION = 2;
+/**
+ * 설정 스키마 버전. 마이그레이션 멱등성 마커
+ *
+ * 두 마이그레이션은 각자의 가드를 쓴다. v2가 이 상수를 그대로 쓰면 v2 실행만으로
+ * 버전이 3이 되어 v3 마이그레이션이 영영 건너뛰어진다.
+ */
+const SETTINGS_VERSION = 3;
+
+/** migrateSettingsToV2 전용 가드 값 */
+const SETTINGS_VERSION_V2 = 2;
 
 /** 이벤트 제목 최대 길이 */
 const MAX_TITLE_LENGTH = 500;
 
+/** 작업 메모 최대 길이 */
+const MAX_NOTE_LENGTH = 2000;
+
+/** 이벤트 하나가 덮을 수 있는 최대 일수 (시작일 포함) */
+const MAX_RANGE_DAYS = 366;
+
 /** 가져오기 시 허용하는 최대 이벤트 수 */
 const MAX_IMPORT_EVENTS = 5000;
+
+/**
+ * 가져오기 전체 문자 수 상한
+ *
+ * 항목별 상한만으로는 총량이 잡히지 않는다. manifest에 `unlimitedStorage`가 있어
+ * 쿼터가 막아주지 않고, persistEvents()가 편집 한 번마다 배열 전체를 다시 쓴다.
+ * 항목 상한만 믿으면 5000 × 2500자가 통과해 이후 모든 체크 토글이 느려진다.
+ */
+const MAX_IMPORT_CHARS = 2000000;
+
+/** 항목당 JSON 봉투(키 이름·구분자·id·날짜) 근사 비용 */
+const IMPORT_ITEM_OVERHEAD_CHARS = 120;
+
+/** 중요도 열거값. 이 목록 밖의 값은 전부 'normal'로 떨어진다 */
+const PRIORITIES = ['low', 'normal', 'high'];
 
 /** 'YYYY-MM-DD' 날짜 키 형식 */
 const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
+/** 하루 밀리초 */
+const MS_PER_DAY = 86400000;
+
 /** 요일 라벨 (일~토) */
 const WEEKDAY_LABELS = ['일', '월', '화', '수', '목', '금', '토'];
+
+/** 중요도 라벨 (설명·aria용) */
+const PRIORITY_LABELS = { low: '보통 이하', normal: '보통', high: '중요' };
+
+/** 마감 상태 라벨 (aria용 — 색에만 의존하지 않기 위해) */
+const DUE_STATE_LABELS = { overdue: '지연', today: '오늘 마감', soon: '내일 마감' };
+
+/**
+ * 날짜 셀 하나에 그리는 최대 칩 수. 넘치면 `+N`
+ *
+ * dot 3개였던 자리에 칩은 2개만 넣는다. 칩은 dot과 달리 가로로 길어
+ * 44px 셀에서 3개를 넣으면 날짜 숫자가 밀린다.
+ */
+const MAX_CHIPS_PER_CELL = 2;
 
 /**
  * @typedef {Object} CalendarEvent
  * @property {string} id          - crypto.randomUUID()
- * @property {string} date        - 'YYYY-MM-DD' (로컬 타임존 기준). makeDateKey()로만 생성
+ * @property {string} startDate   - 'YYYY-MM-DD' (로컬 기준). makeDateKey()로만 생성
+ * @property {string} endDate     - 'YYYY-MM-DD'. 항상 startDate 이상, 최대 MAX_RANGE_DAYS 폭
+ * @property {string} date        - DD6 롤백용 잔존 필드. **항상 startDate에서 파생**한다.
+ *                                  입력값을 그대로 복사하면 두 번째 진실 원천이 되어
+ *                                  범위와 어긋난 날짜에 이벤트가 숨는다
  * @property {string} title       - 사용자 입력. 렌더는 반드시 textContent
+ * @property {string} note        - 작업 메모. 렌더는 반드시 textContent
+ * @property {'low'|'normal'|'high'} priority
  * @property {boolean} done
  * @property {number} createdAt   - Date.now()
+ * @property {number} updatedAt   - Date.now()
  * @property {'local'} source     - M2 Google Calendar 연동 대비 예약 필드
  * @property {string|null} externalId - M2 Google Calendar event id 대비 예약 필드
  */
@@ -57,6 +110,109 @@ function makeDateKey(date) {
 function parseDateKey(key) {
   const [year, month, day] = key.split('-').map(Number);
   return new Date(year, month - 1, day);
+}
+
+/**
+ * 날짜 키를 형식·실재 양쪽으로 검증해 돌려준다. 실패하면 빈 문자열.
+ *
+ * DATE_KEY_PATTERN만으로는 '2026-08-32'가 통과한다. parseDateKey가 9월 1일로
+ * 조용히 정규화하므로 이후 비교는 전부 통과하는데, 저장되는 문자열은 존재하지
+ * 않는 '2026-08-32' 그대로 남는다. 왕복 검증이 그 간극을 막는다.
+ * @param {unknown} value
+ * @returns {string} 유효한 'YYYY-MM-DD' 또는 ''
+ */
+function pickDateKey(value) {
+  if (typeof value !== 'string' || !DATE_KEY_PATTERN.test(value)) return '';
+  return makeDateKey(parseDateKey(value)) === value ? value : '';
+}
+
+/**
+ * 날짜 키를 일 단위로 이동
+ * @param {string} key
+ * @param {number} deltaDays
+ * @returns {string}
+ */
+function shiftDateKey(key, deltaDays) {
+  const date = parseDateKey(key);
+  date.setDate(date.getDate() + deltaDays);
+  return makeDateKey(date);
+}
+
+/**
+ * 두 날짜 키가 덮는 일수 (양끝 포함). 같은 날이면 1.
+ *
+ * DST가 있는 지역에서는 하루가 23/25시간이 되는 날이 있어 나눗셈만 쓰면
+ * 경계에서 한 칸씩 흔들린다. 자정 기준 Date끼리의 차이를 반올림한다.
+ * @param {string} startKey
+ * @param {string} endKey
+ * @returns {number}
+ */
+function spanDays(startKey, endKey) {
+  const start = parseDateKey(startKey).getTime();
+  const end = parseDateKey(endKey).getTime();
+  return Math.round((end - start) / MS_PER_DAY) + 1;
+}
+
+/**
+ * 'YYYY-MM-DD' → '8월 12일' (목록의 기간 표기용)
+ * @param {string} key
+ * @returns {string}
+ */
+function formatShortDate(key) {
+  const date = parseDateKey(key);
+  return `${date.getMonth() + 1}월 ${date.getDate()}일`;
+}
+
+/**
+ * CalendarEvent 생성의 **유일한** 경로
+ *
+ * addEvent / sanitizeImportedEvents / migrateCalendarToV3가 전부 이 함수를 통과한다.
+ * 경로마다 리터럴을 따로 쓰면 어떤 경로로 만들어졌는지에 따라 필드가 있거나 없는
+ * 두 가지 형태가 같은 배열에 섞인다.
+ *
+ * 신뢰 불가 입력을 그대로 받아도 안전하다 — 화이트리스트 필드만 **검증된 지역 변수**로
+ * 새 객체를 만든다. `{...input}` / `Object.assign({}, input)`으로 바꾸면
+ * prototype pollution이 다시 열리므로 금지.
+ *
+ * @param {any} input - 신뢰 불가 가능. v2 형식(date만 있음)도 받는다
+ * @returns {CalendarEvent|null} 유효하지 않으면 null
+ */
+function createCalendarEvent(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+
+  // v3의 startDate를 우선하고, 없으면 v2의 date에서 승격한다 (DD6).
+  const startDate = pickDateKey(input.startDate) || pickDateKey(input.date);
+  if (!startDate) return null;
+
+  // endDate는 startDate와 **독립적으로** 왕복 검증한다.
+  let endDate = pickDateKey(input.endDate) || startDate;
+  if (endDate < startDate) endDate = startDate;
+  if (spanDays(startDate, endDate) > MAX_RANGE_DAYS) {
+    endDate = shiftDateKey(startDate, MAX_RANGE_DAYS - 1);
+  }
+
+  const title = String(input.title ?? '').slice(0, MAX_TITLE_LENGTH).trim();
+  if (!title) return null;
+
+  const createdAt = Number.isFinite(input.createdAt) ? Number(input.createdAt) : Date.now();
+
+  return {
+    id: typeof input.id === 'string' && input.id ? input.id : crypto.randomUUID(),
+    startDate,
+    endDate,
+    // DD6 — M1 코드로 롤백해도 렌더되도록 남기는 잔존 필드.
+    // input.date를 복사하지 **않는다**. 복사하면 startDate와 어긋난 값이 그대로
+    // 저장되어 인덱스가 엉뚱한 날짜에 이벤트를 밀어 넣는다.
+    date: startDate,
+    title,
+    note: String(input.note ?? '').slice(0, MAX_NOTE_LENGTH),
+    priority: PRIORITIES.indexOf(input.priority) !== -1 ? input.priority : 'normal',
+    done: input.done === true,
+    createdAt,
+    updatedAt: Number.isFinite(input.updatedAt) ? Number(input.updatedAt) : createdAt,
+    source: 'local',
+    externalId: typeof input.externalId === 'string' ? input.externalId : null,
+  };
 }
 
 /**
@@ -93,15 +249,73 @@ async function migrateSettingsToV2() {
       'clockPosition',
     ]);
 
-    if ((stored.settingsVersion ?? 1) >= SETTINGS_VERSION) return;
+    // 자체 가드. SETTINGS_VERSION(3)을 쓰면 이 마이그레이션 하나로 버전이 3이 되어
+    // migrateCalendarToV3가 영영 실행되지 않는다.
+    if ((stored.settingsVersion ?? 1) >= SETTINGS_VERSION_V2) return;
 
     await chrome.storage.local.set({
       mainWidgetEnabled: stored.mainWidgetEnabled ?? stored.clockEnabled !== false,
       mainWidgetPosition: stored.mainWidgetPosition ?? (stored.clockPosition || 'center-center'),
-      settingsVersion: SETTINGS_VERSION,
+      settingsVersion: SETTINGS_VERSION_V2,
     });
   } catch (error) {
     console.error('Failed to migrate settings:', error);
+  }
+}
+
+/**
+ * 달력 데이터 스키마 v3 마이그레이션 (멱등, 1회)
+ *
+ * 하는 일 세 가지:
+ * 1. 기존 이벤트를 `startDate = endDate = date`로 승격한다 (DD6). `date`는 지우지 않는다
+ * 2. `searchWidthByWidget.calendar`에 남은 M1 시절 340px 캐시를 제거한다.
+ *    밴드는 폭이 100%인데 이 값이 남아 있으면 applyInitialOverlap()이 첫 페인트에
+ *    340px를 검색창에 그대로 물린다
+ * 3. settingsVersion을 3으로 올린다
+ *
+ * **반드시 매니저를 만들기 전에 await 해야 한다.** SettingsManager가 같은
+ * `searchWidthByWidget` 키를 읽고 리사이즈 콜백에서 read-modify-write로 되쓰므로,
+ * 순서가 어긋나면 나중에 끝난 쪽이 상대의 쓰기를 조용히 덮는다.
+ *
+ * 세 키를 **한 번의 set으로** 커밋한다. 두 번으로 나누면 사이에서 죽었을 때
+ * 버전만 올라가거나 이벤트만 승격된 반쪽 상태가 남는다.
+ * @returns {Promise<void>}
+ */
+async function migrateCalendarToV3() {
+  try {
+    const stored = await chrome.storage.local.get([
+      'settingsVersion',
+      'calendarEvents',
+      'searchWidthByWidget',
+    ]);
+
+    if ((stored.settingsVersion ?? 1) >= SETTINGS_VERSION) return;
+
+    const rawEvents = Array.isArray(stored.calendarEvents) ? stored.calendarEvents : [];
+    /** @type {CalendarEvent[]} */
+    const promoted = [];
+    rawEvents.forEach((event) => {
+      // 이미 v3인 항목은 자기 값을 그대로 보존한다 (재실행 시 note/priority 유실 방지).
+      const next = createCalendarEvent(event);
+      if (next) promoted.push(next);
+    });
+
+    // 화이트리스트 복사. Object.keys 순회 + 대입은 '__proto__' 키가 섞였을 때
+    // 프로토타입을 건드린다. 의미 있는 위젯 타입은 clock/calendar 둘뿐이다.
+    const widths = stored.searchWidthByWidget;
+    /** @type {Record<string, number>} */
+    const nextWidths = {};
+    if (widths && typeof widths === 'object' && typeof widths.clock === 'number' && widths.clock > 0) {
+      nextWidths.clock = widths.clock;
+    }
+
+    await chrome.storage.local.set({
+      calendarEvents: promoted,
+      searchWidthByWidget: nextWidths,
+      settingsVersion: SETTINGS_VERSION,
+    });
+  } catch (error) {
+    console.error('Failed to migrate calendar to v3:', error);
   }
 }
 
@@ -123,32 +337,29 @@ function sanitizeImportedEvents(raw) {
   const usedIds = new Set();
   /** @type {CalendarEvent[]} */
   const sanitized = [];
+  let usedChars = 0;
 
   raw.forEach((item) => {
-    if (!item || typeof item !== 'object' || Array.isArray(item)) return;
+    // 날짜 왕복 검증 · 범위 상한 · 메모 절단 · 중요도 화이트리스트가 전부
+    // createCalendarEvent 안에 있다. 여기서 다시 구현하지 않는다.
+    const event = createCalendarEvent(item);
+    if (!event) return;
 
-    const date = typeof item.date === 'string' ? item.date : '';
-    if (!DATE_KEY_PATTERN.test(date)) return;
-    // 왕복 검증 — '2026-02-30' 같은 존재하지 않는 날짜를 거른다
-    if (makeDateKey(parseDateKey(date)) !== date) return;
+    if (usedIds.has(event.id)) event.id = crypto.randomUUID();
+    usedIds.add(event.id);
 
-    const title = String(item.title ?? '').slice(0, MAX_TITLE_LENGTH).trim();
-    if (!title) return;
-
-    let id = typeof item.id === 'string' && item.id ? item.id : '';
-    if (!id || usedIds.has(id)) id = crypto.randomUUID();
-    usedIds.add(id);
-
-    sanitized.push({
-      id,
-      date,
-      title,
-      done: item.done === true,
-      createdAt: Number.isFinite(item.createdAt) ? Number(item.createdAt) : Date.now(),
-      source: 'local',
-      externalId: typeof item.externalId === 'string' ? item.externalId : null,
-    });
+    usedChars += event.title.length + event.note.length + IMPORT_ITEM_OVERHEAD_CHARS;
+    sanitized.push(event);
   });
+
+  // 항목 수와 항목별 길이를 각각 막아도 그 곱은 막히지 않는다.
+  // 조용히 잘라내지 않고 가져오기 전체를 거절한다 — 사용자가 적은 것이
+  // 일부만 들어왔는지 모른 채로 남는 편이 더 나쁘다.
+  if (usedChars > MAX_IMPORT_CHARS) {
+    throw new Error(
+      `가져올 내용이 너무 큽니다 (약 ${Math.round(usedChars / 10000) / 100}만자, 최대 ${MAX_IMPORT_CHARS / 10000}만자). 항목을 줄여 다시 시도해 주세요.`
+    );
+  }
 
   return sanitized;
 }
@@ -1210,7 +1421,13 @@ class CalendarManager {
      */
     this.events = [];
 
-    /** @type {Map<string, CalendarEvent[]>} 날짜 키 → 이벤트 목록 */
+    /**
+     * 렌더 창(42칸)에 걸친 이벤트만 담는 날짜 버킷. renderGrid()가 매 렌더마다 새로 만든다.
+     *
+     * 전역으로 범위를 날짜 전개하면 최악의 경우 `이벤트 수 × 범위 일수`만큼
+     * 엔트리가 생긴다(5000 × 366). 표시 중인 42일과 겹치는 구간만 담아 상한을 건다.
+     * @type {Map<string, CalendarEvent[]>}
+     */
     this.eventsByDate = new Map();
 
     const now = new Date();
@@ -1222,6 +1439,20 @@ class CalendarManager {
     this.selectedKey = null;
     /** @type {string} roving tabindex 대상 */
     this.focusKey = this.todayKey;
+
+    /**
+     * Shift+방향키로 잡는 범위. 마우스 없이 여러 날 일정을 만들기 위한 경로다.
+     * anchor가 null이면 범위 선택 중이 아니다.
+     * @type {string|null}
+     */
+    this.rangeAnchorKey = null;
+    /** @type {string|null} */
+    this.rangeEndKey = null;
+
+    /** @type {{mode: 'create'|'edit', id: string|null}|null} 모달 상태 */
+    this.modalState = null;
+    /** @type {HTMLElement|null} 모달을 연 요소. 닫을 때 포커스를 돌려준다 */
+    this.modalReturnFocus = null;
 
     /**
      * 저장 진행/실패 중인 스냅샷. null이 아니면 새 편집을 차단한다.
@@ -1244,6 +1475,28 @@ class CalendarManager {
     this.errorElement = null;
     this.errorTextElement = null;
     this.errorRetryButton = null;
+
+    /**
+     * 상세 모달의 DOM 묶음 (달력 루트 밖에 있다 — 밴드의 overflow에 갇히면 안 된다)
+     *
+     * 요소를 열한 개의 nullable 필드로 흩어 두지 않고 하나로 묶는다. 전부 있거나
+     * 전부 없거나 둘 중 하나이므로 검사도 한 번이면 되고, 쓰는 쪽에서
+     * `if (!modal) return`을 한 번 통과하면 나머지는 전부 확정이다.
+     * @type {{
+     *   root: HTMLElement,
+     *   heading: HTMLElement,
+     *   form: HTMLFormElement,
+     *   titleInput: HTMLInputElement,
+     *   startInput: HTMLInputElement,
+     *   endInput: HTMLInputElement,
+     *   noteInput: HTMLTextAreaElement,
+     *   noteCount: HTMLElement,
+     *   error: HTMLElement,
+     *   deleteButton: HTMLElement,
+     *   cancelButton: HTMLElement,
+     * }|null}
+     */
+    this.modal = null;
   }
 
   /**
@@ -1277,10 +1530,337 @@ class CalendarManager {
       return;
     }
 
+    this.initializeModalRefs();
+
     await this.loadEvents();
     this.render();
     this.setupEventListeners();
     this.startRolloverWatch();
+  }
+
+  /**
+   * 상세 모달 DOM 참조 수집
+   *
+   * 모달은 달력 루트 밖(body 직속)에 있다. 밴드 안에 두면 밴드의 max-height와
+   * overflow에 갇혀 잘린다.
+   *
+   * 하나라도 없으면 상세 경로만 끄고 달력 본체는 계속 동작하게 둔다.
+   */
+  initializeModalRefs() {
+    const root = document.getElementById('calendarEventModal');
+    const heading = document.getElementById('calendarEventModalTitle');
+    const form = document.getElementById('calendarEventForm');
+    const titleInput = document.getElementById('calendarEventTitle');
+    const startInput = document.getElementById('calendarEventStart');
+    const endInput = document.getElementById('calendarEventEnd');
+    const noteInput = document.getElementById('calendarEventNote');
+    const noteCount = document.getElementById('calendarEventNoteCount');
+    const error = document.getElementById('calendarEventError');
+    const deleteButton = document.getElementById('calendarEventDelete');
+    const cancelButton = document.getElementById('calendarEventCancel');
+
+    if (
+      !root ||
+      !heading ||
+      !(form instanceof HTMLFormElement) ||
+      !(titleInput instanceof HTMLInputElement) ||
+      !(startInput instanceof HTMLInputElement) ||
+      !(endInput instanceof HTMLInputElement) ||
+      !(noteInput instanceof HTMLTextAreaElement) ||
+      !noteCount ||
+      !error ||
+      !deleteButton ||
+      !cancelButton
+    ) {
+      console.error('Calendar detail modal elements not found');
+      this.modal = null;
+      const trigger = this.root.querySelector('.calendar-detail-add');
+      if (trigger instanceof HTMLElement) trigger.hidden = true;
+      return;
+    }
+
+    this.modal = {
+      root,
+      heading,
+      form,
+      titleInput,
+      startInput,
+      endInput,
+      noteInput,
+      noteCount,
+      error,
+      deleteButton,
+      cancelButton,
+    };
+  }
+
+  /**
+   * 상세 모달이 열려 있는지
+   * @returns {boolean}
+   */
+  isModalOpen() {
+    return Boolean(this.modal && this.modal.root.classList.contains('active'));
+  }
+
+  /**
+   * 상세 모달 열기
+   * @param {'create'|'edit'} mode
+   * @param {CalendarEvent|null} event - edit일 때만
+   */
+  openEventModal(mode, event) {
+    const modal = this.modal;
+    if (!modal) return;
+    // 저장이 진행/실패 중이면 새 편집을 받지 않는다. 인라인 입력과 같은 규칙이다.
+    if (this.pending) return;
+
+    this.modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    this.modalState = { mode, id: event ? event.id : null };
+
+    const anchor = event ? event.startDate : this.rangeAnchorKey || this.selectedKey || this.focusKey;
+    const other = event ? event.endDate : this.rangeEndKey || anchor;
+    // 범위를 왼쪽으로 확장했으면 anchor가 뒤에 온다
+    const from = anchor <= other ? anchor : other;
+    const to = anchor <= other ? other : anchor;
+
+    modal.heading.textContent = mode === 'edit' ? '일정 수정' : '일정 추가';
+    modal.titleInput.value = event ? event.title : '';
+    modal.startInput.value = from;
+    modal.endInput.value = to;
+    modal.noteInput.value = event ? event.note : '';
+    this.setModalPriority(event ? event.priority : 'normal');
+    this.updateNoteCount();
+    this.hideModalError();
+    modal.deleteButton.hidden = mode !== 'edit';
+
+    modal.root.classList.add('active');
+    modal.titleInput.focus();
+    modal.titleInput.select();
+  }
+
+  /**
+   * 상세 모달 닫기 (저장하지 않음)
+   */
+  closeEventModal() {
+    if (!this.modal) return;
+
+    this.modal.root.classList.remove('active');
+    this.modalState = null;
+
+    // 모달을 연 요소로 포커스를 되돌린다. 그 사이 render()가 셀을 새로 만들었으면
+    // 그 노드는 이미 문서에 없으므로 현재 포커스 날짜로 대신 보낸다.
+    const target = this.modalReturnFocus;
+    this.modalReturnFocus = null;
+    if (target && document.contains(target)) {
+      target.focus();
+    } else {
+      this.focusDayCell(this.focusKey);
+    }
+  }
+
+  /**
+   * @param {string} priority
+   */
+  setModalPriority(priority) {
+    if (!this.modal) return;
+    this.modal.root.querySelectorAll('input[name="calendarEventPriority"]').forEach((radio) => {
+      if (radio instanceof HTMLInputElement) radio.checked = radio.value === priority;
+    });
+  }
+
+  /**
+   * @returns {string}
+   */
+  getModalPriority() {
+    if (!this.modal) return 'normal';
+    const checked = this.modal.root.querySelector('input[name="calendarEventPriority"]:checked');
+    if (checked instanceof HTMLInputElement && PRIORITIES.indexOf(checked.value) !== -1) {
+      return checked.value;
+    }
+    return 'normal';
+  }
+
+  /**
+   * 메모 글자 수 표시. 비어 있으면 아무 말도 하지 않는다.
+   */
+  updateNoteCount() {
+    const modal = this.modal;
+    if (!modal) return;
+
+    const length = modal.noteInput.value.length;
+    if (length === 0) {
+      modal.noteCount.textContent = '';
+      return;
+    }
+    modal.noteCount.textContent =
+      length >= MAX_NOTE_LENGTH
+        ? `${length} / ${MAX_NOTE_LENGTH}자 — 상한에 도달했습니다`
+        : `${length} / ${MAX_NOTE_LENGTH}자`;
+  }
+
+  /**
+   * @param {string} message
+   */
+  showModalError(message) {
+    if (!this.modal) return;
+    this.modal.error.textContent = message;
+    this.modal.error.hidden = false;
+  }
+
+  hideModalError() {
+    if (!this.modal) return;
+    this.modal.error.hidden = true;
+  }
+
+  /**
+   * 상세 모달 저장
+   *
+   * 범위 상한과 앞뒤 역전은 여기서 **말해 준다**. createCalendarEvent()는 조용히
+   * 잘라 맞추지만 그건 신뢰 불가 입력(가져오기)용 방어선이고, 사람이 직접 친
+   * 값을 소리 없이 바꾸면 저장된 것과 화면에 적은 것이 달라진다.
+   */
+  async submitEventModal() {
+    const modal = this.modal;
+    if (!modal || !this.modalState) return;
+
+    const title = modal.titleInput.value.trim();
+    if (!title) {
+      this.showModalError('제목을 입력해 주세요. 제목 없이는 저장할 수 없습니다.');
+      modal.titleInput.focus();
+      return;
+    }
+
+    const startDate = pickDateKey(modal.startInput.value);
+    const endDate = pickDateKey(modal.endInput.value);
+    if (!startDate || !endDate) {
+      this.showModalError('날짜를 확인해 주세요. 시작일과 종료일이 모두 필요합니다.');
+      return;
+    }
+    if (endDate < startDate) {
+      this.showModalError('종료일이 시작일보다 빠릅니다. 저장하지 않았습니다.');
+      modal.endInput.focus();
+      return;
+    }
+    if (spanDays(startDate, endDate) > MAX_RANGE_DAYS) {
+      this.showModalError(`일정 하나는 최대 ${MAX_RANGE_DAYS}일까지입니다. 저장하지 않았습니다.`);
+      modal.endInput.focus();
+      return;
+    }
+
+    const input = {
+      startDate,
+      endDate,
+      title,
+      note: modal.noteInput.value,
+      priority: this.getModalPriority(),
+    };
+
+    const committed =
+      this.modalState.mode === 'edit' && this.modalState.id
+        ? await this.updateEvent(this.modalState.id, input)
+        : await this.addEvent(input);
+
+    // 실패하면 모달을 닫지 않는다. 닫으면 사용자가 적은 내용이 사라진 채로
+    // "저장된 척"이 된다 (원칙 4).
+    if (!committed) {
+      this.showModalError('저장하지 못했습니다. 변경 사항은 적용되지 않았습니다.');
+      return;
+    }
+
+    // 방금 저장한 일정이 보이는 자리로 뷰를 옮긴다
+    const start = parseDateKey(startDate);
+    this.viewYear = start.getFullYear();
+    this.viewMonth = start.getMonth();
+    this.clearRangeSelection();
+    this.selectedKey = startDate;
+    this.focusKey = startDate;
+    this.render();
+    this.closeEventModal();
+  }
+
+  /**
+   * 상세 모달에서 삭제
+   */
+  async deleteFromModal() {
+    if (!this.modalState || !this.modalState.id) return;
+
+    const committed = await this.deleteEvent(this.modalState.id);
+    if (!committed) {
+      this.showModalError('삭제하지 못했습니다. 변경 사항은 적용되지 않았습니다.');
+      return;
+    }
+    this.closeEventModal();
+  }
+
+  /**
+   * 모달 안 키 처리 — Esc 닫기 + Tab 포커스 트랩
+   * @param {KeyboardEvent} e
+   */
+  handleModalKeydown(e) {
+    if (!this.isModalOpen()) return;
+
+    if (e.key === 'Escape') {
+      // 달력 패널의 Esc와 겹치지 않게 여기서 멈춘다. 모달은 달력 루트 밖에 있어
+      // 구조적으로도 안 겹치지만, 나중에 위치가 바뀌어도 순서가 유지되게 해 둔다.
+      e.preventDefault();
+      e.stopPropagation();
+      this.closeEventModal();
+      return;
+    }
+
+    if (e.key !== 'Tab') return;
+
+    const focusable = this.getModalFocusable();
+    if (focusable.length === 0) return;
+
+    const first = focusable[0];
+    const last = focusable[focusable.length - 1];
+
+    if (e.shiftKey && document.activeElement === first) {
+      e.preventDefault();
+      last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault();
+      first.focus();
+    }
+  }
+
+  /**
+   * 모달 안에서 실제로 포커스를 받을 수 있는 요소들
+   * @returns {HTMLElement[]}
+   */
+  getModalFocusable() {
+    if (!this.modal) return [];
+
+    const selector =
+      'a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+    /** @type {HTMLElement[]} */
+    const focusable = [];
+    this.modal.root.querySelectorAll(selector).forEach((element) => {
+      // hidden(삭제 버튼)과 display:none 조상 아래의 요소는 실제로 포커스를 못 받는다
+      if (element instanceof HTMLElement && !element.hidden && element.offsetParent !== null) {
+        focusable.push(element);
+      }
+    });
+    return focusable;
+  }
+
+  /**
+   * Shift+방향키 범위 선택 해제
+   */
+  clearRangeSelection() {
+    this.rangeAnchorKey = null;
+    this.rangeEndKey = null;
+  }
+
+  /**
+   * 현재 잡혀 있는 범위 (정렬된 [시작, 끝]). 없으면 null
+   * @returns {{from: string, to: string}|null}
+   */
+  getSelectedRange() {
+    if (!this.rangeAnchorKey || !this.rangeEndKey) return null;
+    return this.rangeAnchorKey <= this.rangeEndKey
+      ? { from: this.rangeAnchorKey, to: this.rangeEndKey }
+      : { from: this.rangeEndKey, to: this.rangeAnchorKey };
   }
 
   /**
@@ -1289,27 +1869,59 @@ class CalendarManager {
   async loadEvents() {
     try {
       const result = await chrome.storage.local.get(['calendarEvents']);
-      this.events = Array.isArray(result.calendarEvents) ? result.calendarEvents : [];
+      const raw = Array.isArray(result.calendarEvents) ? result.calendarEvents : [];
+      // 마이그레이션이 실패했거나(스토리지 오류) 구버전이 쓴 값이 남아 있어도
+      // 메모리에는 항상 v3 한 가지 형태만 둔다. 렌더 경로가 필드 유무를 검사하지
+      // 않아도 되게 하려면 형태가 갈라지는 지점이 없어야 한다.
+      this.events = raw.map((event) => createCalendarEvent(event)).filter((event) => event !== null);
     } catch (error) {
       console.error('Failed to load calendar events:', error);
       this.events = [];
     }
-    this.rebuildIndex();
+    // 인덱스는 renderGrid()가 렌더 창을 알게 된 뒤에 만든다.
   }
 
   /**
-   * 날짜별 이벤트 인덱스 재구성 (커밋 시점에만 호출)
+   * 렌더 창과 겹치는 이벤트만 날짜 버킷에 담는다 (DD7)
+   *
+   * 'YYYY-MM-DD'는 사전순 비교가 곧 시간순 비교라 문자열 그대로 겹침을 판정한다.
+   * @param {string} windowStartKey - 그리드 첫 칸
+   * @param {string} windowEndKey   - 그리드 마지막 칸
    */
-  rebuildIndex() {
+  rebuildIndex(windowStartKey, windowEndKey) {
     this.eventsByDate = new Map();
+    if (!windowStartKey || !windowEndKey) return;
+
     this.events.forEach((event) => {
-      const bucket = this.eventsByDate.get(event.date);
-      if (bucket) {
-        bucket.push(event);
-      } else {
-        this.eventsByDate.set(event.date, [event]);
+      // 창 밖이면 전개 자체를 하지 않는다
+      if (event.endDate < windowStartKey || event.startDate > windowEndKey) return;
+
+      const from = event.startDate < windowStartKey ? windowStartKey : event.startDate;
+      const to = event.endDate > windowEndKey ? windowEndKey : event.endDate;
+
+      let cursor = from;
+      while (cursor <= to) {
+        const bucket = this.eventsByDate.get(cursor);
+        if (bucket) {
+          bucket.push(event);
+        } else {
+          this.eventsByDate.set(cursor, [event]);
+        }
+        cursor = shiftDateKey(cursor, 1);
       }
     });
+  }
+
+  /**
+   * 특정 날짜에 걸친 이벤트 (렌더 창과 무관)
+   *
+   * 패널은 월을 넘겨도 열려 있을 수 있어 선택 날짜가 렌더 창 밖일 수 있다.
+   * 창 인덱스로 조회하면 그 경우 빈 목록이 나오므로 전체를 훑는다.
+   * @param {string} dateKey
+   * @returns {CalendarEvent[]}
+   */
+  getEventsForDate(dateKey) {
+    return this.events.filter((event) => event.startDate <= dateKey && dateKey <= event.endDate);
   }
 
   /**
@@ -1334,7 +1946,6 @@ class CalendarManager {
       if (opToken !== this.opSeq) return false;
 
       this.events = nextEvents;
-      this.rebuildIndex();
       this.pending = null;
       this.setPendingState(false);
       this.hideError();
@@ -1393,23 +2004,41 @@ class CalendarManager {
 
   /**
    * 할 일 추가
-   * @param {string} dateKey
-   * @param {string} title
+   *
+   * 객체 하나만 받는다. 간편 입력(제목만)과 상세 모달(범위·중요도·메모)이 같은
+   * 경로를 타야 두 입력이 만든 이벤트의 형태가 갈라지지 않는다.
+   * @param {{startDate: string, endDate?: string, title: string, priority?: string, note?: string}} input
+   * @returns {Promise<boolean>} 커밋 성공 여부
    */
-  async addEvent(dateKey, title) {
-    const trimmed = title.trim().slice(0, MAX_TITLE_LENGTH);
-    if (!trimmed) return;
+  async addEvent(input) {
+    const event = createCalendarEvent(input);
+    if (!event) return false;
 
-    const nextEvents = this.events.concat({
-      id: crypto.randomUUID(),
-      date: dateKey,
-      title: trimmed,
-      done: false,
-      createdAt: Date.now(),
-      source: 'local',
-      externalId: null,
+    return this.persistEvents(this.events.concat(event));
+  }
+
+  /**
+   * 기존 이벤트 수정 (상세 모달)
+   * @param {string} id
+   * @param {{startDate: string, endDate?: string, title: string, priority?: string, note?: string}} input
+   * @returns {Promise<boolean>}
+   */
+  async updateEvent(id, input) {
+    const existing = this.events.find((event) => event.id === id);
+    if (!existing) return false;
+
+    // id·createdAt·done은 보존하고 편집 가능한 필드만 덮는다.
+    const next = createCalendarEvent({
+      ...input,
+      id: existing.id,
+      done: existing.done,
+      createdAt: existing.createdAt,
+      updatedAt: Date.now(),
+      externalId: existing.externalId,
     });
-    await this.persistEvents(nextEvents);
+    if (!next) return false;
+
+    return this.persistEvents(this.events.map((event) => (event.id === id ? next : event)));
   }
 
   /**
@@ -1417,17 +2046,19 @@ class CalendarManager {
    * @param {string} id
    */
   async toggleEvent(id) {
-    const nextEvents = this.events.map((event) => (event.id === id ? { ...event, done: !event.done } : event));
+    const nextEvents = this.events.map((event) =>
+      event.id === id ? { ...event, done: !event.done, updatedAt: Date.now() } : event
+    );
     await this.persistEvents(nextEvents);
   }
 
   /**
    * 할 일 삭제
    * @param {string} id
+   * @returns {Promise<boolean>} 커밋 성공 여부
    */
   async deleteEvent(id) {
-    const nextEvents = this.events.filter((event) => event.id !== id);
-    await this.persistEvents(nextEvents);
+    return this.persistEvents(this.events.filter((event) => event.id !== id));
   }
 
   /**
@@ -1463,6 +2094,7 @@ class CalendarManager {
         if (button.dataset.nav === 'prev') this.shiftMonth(-1);
         else if (button.dataset.nav === 'next') this.shiftMonth(1);
         else if (button.dataset.nav === 'today') this.goToToday();
+        else if (button.dataset.nav === 'detail') this.openEventModal('create', null);
       });
     }
 
@@ -1492,6 +2124,28 @@ class CalendarManager {
 
         if (action.dataset.todoAction === 'toggle') this.toggleEvent(item.dataset.id);
         else if (action.dataset.todoAction === 'delete') this.deleteEvent(item.dataset.id);
+        else if (action.dataset.todoAction === 'edit') {
+          const target = this.events.find((event) => event.id === item.dataset.id);
+          if (target) this.openEventModal('edit', target);
+        }
+      });
+    }
+
+    // 상세 모달
+    const modal = this.modal;
+    if (modal) {
+      modal.form.addEventListener('submit', (e) => {
+        e.preventDefault();
+        this.submitEventModal();
+      });
+      modal.cancelButton.addEventListener('click', () => this.closeEventModal());
+      modal.deleteButton.addEventListener('click', () => this.deleteFromModal());
+      modal.noteInput.addEventListener('input', () => this.updateNoteCount());
+      modal.root.addEventListener('keydown', (e) => this.handleModalKeydown(e));
+
+      // 배경(모달 바깥) 클릭으로 닫기 — 기존 설정 모달과 같은 관용구
+      modal.root.addEventListener('click', (e) => {
+        if (e.target === modal.root) this.closeEventModal();
       });
     }
 
@@ -1502,7 +2156,12 @@ class CalendarManager {
         if (!(this.todoInputElement instanceof HTMLInputElement) || !this.selectedKey) return;
         const value = this.todoInputElement.value;
         this.todoInputElement.value = '';
-        await this.addEvent(this.selectedKey, value);
+        // 간편 입력은 언제나 하루짜리다. 범위는 상세 모달에서만 늘린다.
+        await this.addEvent({
+          startDate: this.selectedKey,
+          endDate: this.selectedKey,
+          title: value,
+        });
         // 저장 중 input이 disabled 되면서 포커스가 빠진다. 연속 입력을 위해 되돌린다.
         this.todoInputElement.focus();
       });
@@ -1521,6 +2180,9 @@ class CalendarManager {
 
     // Esc로 패널 닫기
     this.root.addEventListener('keydown', (e) => {
+      // 모달이 열려 있으면 Esc는 모달 것이다. 모달이 이 루트 밖에 있어 지금은
+      // 이벤트가 여기까지 오지 않지만, 순서를 코드로도 못박아 둔다.
+      if (this.isModalOpen()) return;
       if (e.key === 'Escape' && this.selectedKey) {
         e.stopPropagation();
         this.closePanel();
@@ -1536,6 +2198,14 @@ class CalendarManager {
     // Enter / Space는 의도적으로 처리하지 않는다. 날짜 셀이 <button>이라
     // 네이티브 click이 발생하고, 여기서도 selectDate를 부르면 두 번 토글되어
     // 패널이 열리자마자 닫힌다. 선택은 click 델리게이션에 맡긴다.
+    // 범위를 잡아 둔 상태의 Enter는 날짜 선택이 아니라 상세 입력으로 간다.
+    // 마우스 없이 "범위 선택 → 상세 모달 → 저장"에 도달하는 경로다.
+    if (e.key === 'Enter' && this.getSelectedRange() && this.modal) {
+      e.preventDefault();
+      this.openEventModal('create', null);
+      return;
+    }
+
     const moves = {
       ArrowLeft: -1,
       ArrowRight: 1,
@@ -1548,6 +2218,18 @@ class CalendarManager {
       return;
     }
     e.preventDefault();
+
+    const isArrow =
+      e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown';
+    const extending = e.shiftKey && isArrow;
+
+    if (extending) {
+      // 확장을 시작한 자리가 범위의 한쪽 끝으로 고정된다
+      if (this.rangeAnchorKey === null) this.rangeAnchorKey = this.focusKey;
+    } else {
+      // Shift 없이 움직이면 잡아 둔 범위를 놓는다
+      this.clearRangeSelection();
+    }
 
     const current = parseDateKey(this.focusKey);
 
@@ -1568,11 +2250,15 @@ class CalendarManager {
     }
 
     this.focusKey = makeDateKey(current);
+    if (extending) this.rangeEndKey = this.focusKey;
 
     // 다른 달로 넘어가면 뷰를 따라 이동
     if (current.getFullYear() !== this.viewYear || current.getMonth() !== this.viewMonth) {
       this.viewYear = current.getFullYear();
       this.viewMonth = current.getMonth();
+      this.render();
+    } else if (extending) {
+      // 범위 하이라이트를 다시 칠해야 하므로 tabindex만 갱신해서는 안 된다
       this.render();
     } else {
       this.updateRovingTabindex();
@@ -1636,6 +2322,8 @@ class CalendarManager {
    * @param {string} dateKey
    */
   selectDate(dateKey) {
+    // 날짜 하나를 고르는 순간 잡아 둔 범위는 의미를 잃는다
+    this.clearRangeSelection();
     this.focusKey = dateKey;
     this.selectedKey = this.selectedKey === dateKey ? null : dateKey;
     this.render();
@@ -1673,20 +2361,35 @@ class CalendarManager {
   }
 
   /**
-   * 마감 상태 판정
-   * @param {string} dateKey
-   * @param {boolean} allDone - 해당 날짜 이벤트가 전부 완료인지
-   * @returns {string} '' | 'overdue' | 'today' | 'soon'
+   * 이벤트 하나의 마감 상태
+   *
+   * 판정 기준은 **종료일**이다. 3일짜리 일정의 첫날은 아직 지연이 아니다.
+   * @param {CalendarEvent} event
+   * @returns {'' | 'overdue' | 'today' | 'soon'}
    */
-  getDueState(dateKey, allDone) {
-    if (allDone) return '';
-    if (dateKey < this.todayKey) return 'overdue';
-    if (dateKey === this.todayKey) return 'today';
-
-    const tomorrow = parseDateKey(this.todayKey);
-    tomorrow.setDate(tomorrow.getDate() + 1);
-    if (dateKey === makeDateKey(tomorrow)) return 'soon';
+  getEventDueState(event) {
+    if (event.done) return '';
+    if (event.endDate < this.todayKey) return 'overdue';
+    if (event.endDate === this.todayKey) return 'today';
+    if (event.endDate === shiftDateKey(this.todayKey, 1)) return 'soon';
     return '';
+  }
+
+  /**
+   * 셀의 마감 상태 = 그 셀에 걸친 이벤트 중 가장 급한 것 (지연 > 오늘 > 내일)
+   * @param {CalendarEvent[]} dayEvents
+   * @returns {'' | 'overdue' | 'today' | 'soon'}
+   */
+  getCellDueState(dayEvents) {
+    /** @type {'' | 'overdue' | 'today' | 'soon'} */
+    let state = '';
+    for (let i = 0; i < dayEvents.length; i += 1) {
+      const eventState = this.getEventDueState(dayEvents[i]);
+      if (eventState === 'overdue') return 'overdue';
+      if (eventState === 'today') state = 'today';
+      else if (eventState === 'soon' && state !== 'today') state = 'soon';
+    }
+    return state;
   }
 
   /**
@@ -1694,8 +2397,57 @@ class CalendarManager {
    */
   render() {
     this.renderTitle();
+    this.renderSummary();
     this.renderGrid();
     this.renderPanel();
+  }
+
+  /**
+   * 요약 한 줄 — `오늘 마감 2건 · 지연 1건`
+   *
+   * 카드도 진행률 바도 만들지 않는다. 그 형태는 이 제품이 "새 탭이 일처럼 느껴지면
+   * 실패"라며 금지한 업무용 대시보드 어휘다. 셀 것이 없으면 **노드 자체를 없앤다** —
+   * "마감 없음"이라고 말하려고 한 줄을 차지하지 않는다.
+   *
+   * 절충 하나: aria-live는 이미 문서에 있는 노드의 변화만 알린다. 0건일 때 노드를
+   * 지우는 요구와 정확히 상충하므로, 0 → 1건 전환은 보조기기가 못 읽을 수 있다.
+   * "없을 때 아무것도 없다"를 우선했다.
+   */
+  renderSummary() {
+    const header = this.root.querySelector('.calendar-header');
+    if (!header) return;
+
+    const existing = header.querySelector('.calendar-summary');
+
+    let dueToday = 0;
+    let overdue = 0;
+    this.events.forEach((event) => {
+      const state = this.getEventDueState(event);
+      if (state === 'today') dueToday += 1;
+      else if (state === 'overdue') overdue += 1;
+    });
+
+    if (dueToday === 0 && overdue === 0) {
+      if (existing) existing.remove();
+      return;
+    }
+
+    const parts = [];
+    if (dueToday > 0) parts.push(`오늘 마감 ${dueToday}건`);
+    if (overdue > 0) parts.push(`지연 ${overdue}건`);
+    const text = parts.join(' · ');
+
+    if (existing) {
+      if (existing.textContent !== text) existing.textContent = text;
+      return;
+    }
+
+    const summary = document.createElement('p');
+    summary.className = 'calendar-summary';
+    summary.setAttribute('aria-live', 'polite');
+    summary.textContent = text;
+    // '일정 추가' 버튼 앞. 버튼이 없으면 헤더 끝에 붙는다.
+    header.insertBefore(summary, header.querySelector('.calendar-detail-add'));
   }
 
   /**
@@ -1716,6 +2468,11 @@ class CalendarManager {
     // 그리드 시작일 = 이 달 1일이 속한 주의 일요일
     const firstOfMonth = new Date(this.viewYear, this.viewMonth, 1);
     const gridStart = new Date(this.viewYear, this.viewMonth, 1 - firstOfMonth.getDay());
+    const gridEnd = new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + 41);
+
+    // 셀을 만들기 전에 이 42일 창에 걸친 이벤트만 버킷화한다 (DD7).
+    // 렌더 창이 정해진 뒤에야 만들 수 있으므로 여기가 유일한 호출 지점이다.
+    this.rebuildIndex(makeDateKey(gridStart), makeDateKey(gridEnd));
 
     // 42개 셀을 fragment에 모아 한 번만 커밋 (행마다 append 하면 리플로우가 6회)
     const fragment = document.createDocumentFragment();
@@ -1744,7 +2501,7 @@ class CalendarManager {
     const dateKey = makeDateKey(cellDate);
     const dayEvents = this.eventsByDate.get(dateKey) || [];
     const pendingCount = dayEvents.filter((event) => !event.done).length;
-    const dueState = this.getDueState(dateKey, dayEvents.length > 0 && pendingCount === 0);
+    const dueState = this.getCellDueState(dayEvents);
 
     const cell = document.createElement('button');
     cell.type = 'button';
@@ -1759,16 +2516,22 @@ class CalendarManager {
       cell.setAttribute('aria-current', 'date');
     }
     if (dateKey === this.selectedKey) cell.classList.add('is-selected');
+
+    // Shift+방향키로 잡는 중인 범위
+    const range = this.getSelectedRange();
+    if (range && range.from <= dateKey && dateKey <= range.to) cell.classList.add('is-in-range');
     // is-due-* 는 '오늘 날짜'를 뜻하는 is-today와 별도 네임스페이스다
     if (dueState) cell.classList.add(`is-due-${dueState}`);
     cell.setAttribute('aria-selected', dateKey === this.selectedKey ? 'true' : 'false');
 
+    // 상태를 색으로만 말하지 않는다 — 스크린리더에도 같은 정보가 가야 한다
     const weekday = WEEKDAY_LABELS[cellDate.getDay()];
-    const countLabel = dayEvents.length > 0 ? `, 할 일 ${dayEvents.length}개` : '';
-    cell.setAttribute(
-      'aria-label',
-      `${cellDate.getMonth() + 1}월 ${cellDate.getDate()}일 ${weekday}요일${countLabel}`
-    );
+    const labelParts = [`${cellDate.getMonth() + 1}월 ${cellDate.getDate()}일 ${weekday}요일`];
+    if (dayEvents.length > 0) {
+      labelParts.push(`할 일 ${dayEvents.length}개`);
+      if (pendingCount > 0 && dueState) labelParts.push(DUE_STATE_LABELS[dueState]);
+    }
+    cell.setAttribute('aria-label', labelParts.join(', '));
 
     const number = document.createElement('span');
     number.className = 'calendar-day-num';
@@ -1776,36 +2539,58 @@ class CalendarManager {
     cell.appendChild(number);
 
     if (dayEvents.length > 0) {
-      cell.appendChild(this.createDots(dayEvents));
+      cell.appendChild(this.createChips(dayEvents, dateKey));
     }
 
     return cell;
   }
 
   /**
-   * 이벤트 인디케이터 (dot 최대 3 + +N)
+   * 범위 칩 (최대 MAX_CHIPS_PER_CELL + `+N`)
+   *
+   * 칩 하나가 그 셀에서 이벤트의 어느 지점인지를 **형태로** 말한다:
+   * 하루짜리는 양끝이 둥글고, 시작/끝은 한쪽만 둥글며, 중간은 양끝이 각져
+   * 좌우 셀로 이어져 보인다. 색을 회색조로 낮춰도 범위가 읽힌다.
    * @param {CalendarEvent[]} dayEvents
+   * @param {string} dateKey - 이 칩을 그리는 셀의 날짜
    * @returns {HTMLElement}
    */
-  createDots(dayEvents) {
-    const dots = document.createElement('span');
-    dots.className = 'calendar-dots';
-    dots.setAttribute('aria-hidden', 'true');
+  createChips(dayEvents, dateKey) {
+    const chips = document.createElement('span');
+    chips.className = 'calendar-chips';
+    chips.setAttribute('aria-hidden', 'true');
 
-    dayEvents.slice(0, 3).forEach((event) => {
-      const dot = document.createElement('span');
-      dot.className = event.done ? 'calendar-dot is-done' : 'calendar-dot';
-      dots.appendChild(dot);
+    dayEvents.slice(0, MAX_CHIPS_PER_CELL).forEach((event) => {
+      const chip = document.createElement('span');
+      const isStart = event.startDate === dateKey;
+      const isEnd = event.endDate === dateKey;
+
+      let shape = 'is-middle';
+      if (isStart && isEnd) shape = 'is-single';
+      else if (isStart) shape = 'is-start';
+      else if (isEnd) shape = 'is-end';
+
+      const dueState = this.getEventDueState(event);
+      chip.className = [
+        'calendar-chip',
+        shape,
+        `is-priority-${event.priority}`,
+        dueState ? `is-due-${dueState}` : '',
+        event.done ? 'is-done' : '',
+      ]
+        .filter(Boolean)
+        .join(' ');
+      chips.appendChild(chip);
     });
 
-    if (dayEvents.length > 3) {
+    if (dayEvents.length > MAX_CHIPS_PER_CELL) {
       const more = document.createElement('span');
-      more.className = 'calendar-dot-more';
-      more.textContent = `+${dayEvents.length - 3}`;
-      dots.appendChild(more);
+      more.className = 'calendar-chip-more';
+      more.textContent = `+${dayEvents.length - MAX_CHIPS_PER_CELL}`;
+      chips.appendChild(more);
     }
 
-    return dots;
+    return chips;
   }
 
   /**
@@ -1813,6 +2598,9 @@ class CalendarManager {
    */
   renderPanel() {
     if (!this.panelElement || !this.panelTitleElement || !this.todoListElement) return;
+
+    // 패널이 열려 있을 때만 본문이 2열이 된다. 닫혀 있으면 달력이 폭을 다 쓴다.
+    this.root.classList.toggle('has-panel', Boolean(this.selectedKey));
 
     if (!this.selectedKey) {
       this.panelElement.hidden = true;
@@ -1825,7 +2613,8 @@ class CalendarManager {
     this.panelTitleElement.textContent = `${selected.getMonth() + 1}월 ${selected.getDate()}일 (${weekday})`;
 
     this.todoListElement.textContent = '';
-    const dayEvents = this.eventsByDate.get(this.selectedKey) || [];
+    // 창 인덱스가 아니라 전체 조회를 쓴다 — 패널은 월을 넘겨도 열려 있을 수 있다
+    const dayEvents = this.getEventsForDate(this.selectedKey);
 
     if (dayEvents.length === 0) {
       const empty = document.createElement('li');
@@ -1859,10 +2648,45 @@ class CalendarManager {
     toggle.setAttribute('aria-label', `${event.title} 완료 ${event.done ? '해제' : '표시'}`);
     item.appendChild(toggle);
 
+    // 제목 + (여러 날이면) 기간 + (있으면) 메모 한 줄. 전부 textContent.
+    const body = document.createElement('span');
+    body.className = 'calendar-todo-body';
+
     const title = document.createElement('span');
     title.className = 'calendar-todo-title';
     title.textContent = event.title;
-    item.appendChild(title);
+    body.appendChild(title);
+
+    const meta = [];
+    if (event.startDate !== event.endDate) {
+      meta.push(`${formatShortDate(event.startDate)} – ${formatShortDate(event.endDate)}`);
+    }
+    if (event.priority !== 'normal') meta.push(PRIORITY_LABELS[event.priority]);
+    if (meta.length > 0) {
+      const metaLine = document.createElement('span');
+      metaLine.className = 'calendar-todo-meta';
+      metaLine.textContent = meta.join(' · ');
+      body.appendChild(metaLine);
+    }
+
+    if (event.note) {
+      const note = document.createElement('span');
+      note.className = 'calendar-todo-note';
+      note.textContent = event.note;
+      body.appendChild(note);
+    }
+
+    item.appendChild(body);
+
+    // 목록에서 중요도는 위의 meta 줄이 글자로 말한다. 색 배지를 또 붙이지 않는다 —
+    // 같은 사실을 두 번 말하는 표식은 밀도만 올린다.
+    const edit = document.createElement('button');
+    edit.type = 'button';
+    edit.className = 'calendar-todo-edit';
+    edit.dataset.todoAction = 'edit';
+    edit.setAttribute('aria-label', `${event.title} 상세 편집`);
+    edit.textContent = '편집';
+    item.appendChild(edit);
 
     const remove = document.createElement('button');
     remove.type = 'button';
@@ -2395,7 +3219,14 @@ class SettingsManager {
   applyWidgetSetting(enabled) {
     const active = this.getActiveWidgetElement();
     this.getAllWidgetElements().forEach((element) => {
-      element.style.display = enabled && element === active ? 'block' : 'none';
+      if (!enabled || element !== active) {
+        element.style.display = 'none';
+        return;
+      }
+      // 달력 밴드의 레이아웃은 CSS가 정한다(flex + 높이 상한). 인라인 block이
+      // 그걸 덮으면 내부 스크롤 영역이 성립하지 않고 밴드가 화면을 삼킨다.
+      // 시계는 기존 값 'block'을 그대로 유지한다 (UI4).
+      element.style.display = this.widgetType === 'calendar' ? '' : 'block';
     });
   }
 
@@ -2619,6 +3450,9 @@ class SettingsManager {
     const widgetEnabled = this.isWidgetEnabled();
     const searchEnabled = this.isSearchEnabled();
 
+    // 밴드 높이는 검색창을 밀어내는 기준이므로 어느 분기로 빠지든 먼저 갱신한다
+    this.updateBandMetrics();
+
     // 둘 다 활성화된 경우가 아니면 오프셋 전부 제거
     if (!widgetEnabled || !searchEnabled) {
       this.getAllWidgetElements().forEach((element) => {
@@ -2627,6 +3461,19 @@ class SettingsManager {
       this.searchElement.classList.remove('overlap-offset');
       this.searchElement.style.width = '';
       this.searchElement.style.maxWidth = '';
+      return;
+    }
+
+    // 밴드는 위치 개념이 없다. 항상 상단 전체 폭이고, 검색창은 CSS가
+    // --calendar-band-height만큼 비켜준다 (DD3). 여기서 overlap-offset을 붙이면
+    // 밴드가 이유 없이 아래로 밀리고 검색창 폭까지 끌려간다.
+    if (this.widgetType === 'calendar') {
+      this.getAllWidgetElements().forEach((element) => element.classList.remove('overlap-offset'));
+      this.searchElement.classList.remove('overlap-offset');
+      this.searchElement.style.width = '';
+      this.searchElement.style.maxWidth = '';
+      this.searchElement.style.textAlign = '';
+      this.applyMeasuredCollision();
       return;
     }
 
@@ -2666,31 +3513,39 @@ class SettingsManager {
 
     this.isMeasuringCollision = true;
     try {
+      // 폭 축소로 충돌을 푸는 경로는 달력이 유일한 소비자였고, 밴드가 되면서
+      // 성립하지 않는다 — 폭이 100%라 줄일 폭이 없다. 그 역할은 이제 밴드
+      // `max-height` + 내부 스크롤이 대신한다 (DD8).
+      //
+      // 클래스 제거는 남긴다. 이전 버전이 붙여 둔 collision-compact가 그대로
+      // 남아 있으면 밴드가 이유 없이 축소 밀도로 그려진다.
       widget.classList.remove('collision-compact');
-
-      if (this.widgetType !== 'calendar' || !this.isWidgetEnabled() || !this.isSearchEnabled()) return;
-
-      const widgetRect = widget.getBoundingClientRect();
-      const searchRect = this.searchElement.getBoundingClientRect();
-
-      const intersects = !(
-        widgetRect.right <= searchRect.left ||
-        widgetRect.left >= searchRect.right ||
-        widgetRect.bottom <= searchRect.top ||
-        widgetRect.top >= searchRect.bottom
-      );
-      const outOfViewport =
-        widgetRect.top < 0 ||
-        widgetRect.left < 0 ||
-        widgetRect.bottom > window.innerHeight ||
-        widgetRect.right > window.innerWidth;
-
-      if (intersects || outOfViewport) {
-        widget.classList.add('collision-compact');
-      }
     } finally {
       this.isMeasuringCollision = false;
     }
+  }
+
+  /**
+   * 밴드 실측 높이를 CSS 변수로 내보낸다
+   *
+   * 검색창이 `top-*`일 때만 이 값만큼 아래로 밀어낸다 (DD3). 밴드가 아닐 때는
+   * 변수를 지워 시계 경로의 계산에 끼어들지 않게 한다 (UI4).
+   */
+  updateBandMetrics() {
+    const root = document.documentElement;
+    const isBand = this.widgetType === 'calendar' && this.isWidgetEnabled();
+
+    // 변수 유무만으로 CSS가 판단하면 fallback 0px 때문에 달력을 껐을 때
+    // 검색창이 원래 자리보다 위로 올라간다. 켜짐 여부는 클래스로 따로 말한다.
+    document.body.classList.toggle('has-calendar-band', isBand);
+
+    if (!isBand || !this.calendarElement) {
+      root.style.removeProperty('--calendar-band-height');
+      return;
+    }
+
+    const height = Math.round(this.calendarElement.getBoundingClientRect().height);
+    root.style.setProperty('--calendar-band-height', `${height}px`);
   }
 
   /**
@@ -2699,6 +3554,14 @@ class SettingsManager {
   async matchSearchWidthToWidget() {
     const widget = this.getActiveWidgetElement();
     if (!widget || !this.searchElement) return;
+
+    // 달력 밴드는 폭이 100%다. "위젯 폭에 검색창을 맞춘다"를 그대로 적용하면
+    // 검색창이 화면 전체로 늘어난다 (DD8). 시계 경로는 손대지 않는다 (UI4).
+    if (this.widgetType === 'calendar') {
+      this.searchElement.style.width = '';
+      this.searchElement.style.maxWidth = '';
+      return;
+    }
 
     const widgetWidth = widget.offsetWidth;
 
@@ -2731,6 +3594,11 @@ class SettingsManager {
    * @returns {Promise<number|null>}
    */
   async loadSearchWidth() {
+    // 밴드 모드에서는 캐시 폭을 절대 쓰지 않는다. v3 마이그레이션이 M1 시절
+    // 340px 항목을 지우지만, 그 이후에 어떤 경로로든 값이 다시 생겨도
+    // 첫 페인트에 잘못된 폭이 물리지 않게 여기서 한 번 더 막는다 (DD8).
+    if (this.widgetType === 'calendar') return null;
+
     const cached = this.searchWidthByWidget[this.widgetType];
     if (typeof cached === 'number' && cached > 0) return cached;
 
@@ -2776,7 +3644,17 @@ class SettingsManager {
     const widget = this.getActiveWidgetElement();
     if (!widget || !this.searchElement) return;
 
+    // 검색창이 꺼져 있어도 밴드 높이는 내보낸다. 아래 조기 반환에 묶어 두면
+    // 검색창을 껐다 켜기 전까지 변수가 비어 있다.
+    this.updateBandMetrics();
+
     if (!widgetEnabled || !searchEnabled) return;
+
+    // 밴드는 오프셋·폭 맞춤을 타지 않는다. 실측만 예약해 높이를 확정한다 (DD8).
+    if (this.widgetType === 'calendar') {
+      this.scheduleOverlapCheck();
+      return;
+    }
     if (this.widgetPosition !== this.searchPosition) {
       // 위치가 달라도 실측 충돌은 있을 수 있으므로 검사는 예약한다
       this.scheduleOverlapCheck();
@@ -2831,9 +3709,13 @@ class SettingsManager {
     const searchEnabled = this.isSearchEnabled();
 
     // 메인 위젯 위치 설정 표시/숨김
+    //
+    // 달력은 전체 너비 밴드라 고를 위치가 없다. 그리드만 숨기고 저장값
+    // (mainWidgetPosition)은 읽지도 쓰지도 않으므로, 시계로 되돌리면 이전 위치가
+    // 그대로 복원된다 (DD4).
     if (widgetPositionSetting) {
       const widgetGrid = this.widgetPositionGrid;
-      if (widgetEnabled) {
+      if (widgetEnabled && this.widgetType !== 'calendar') {
         widgetPositionSetting.style.display = 'flex';
         if (widgetGrid) widgetGrid.style.display = 'grid';
       } else {
@@ -2957,7 +3839,10 @@ class Application {
   async initialize() {
     // 어떤 매니저도 설정 키를 읽기 전에 마이그레이션을 끝낸다.
     // 매니저 내부에서 돌리면 다른 매니저가 복사 이전 값을 읽는 경합이 생긴다.
+    // v3는 calendarEvents와 searchWidthByWidget을 건드리므로 CalendarManager /
+    // SettingsManager 생성보다 반드시 앞서야 한다.
     await migrateSettingsToV2();
+    await migrateCalendarToV3();
 
     // DOM 요소 가져오기
     const timeElement = document.getElementById('time');

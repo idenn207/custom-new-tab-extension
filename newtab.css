@@ -658,41 +658,109 @@ body {
  * 담으므로, 밝은 배경 사진 위에서 대비가 무너진다. 배경만 눌러 본문 대비를 확보한다.
  */
 .calendar-widget {
+  /*
+   * 밴드 안쪽 내용의 가로 상한. 밴드 표면은 화면 끝까지 가되 내용은 이 폭 안에서
+   * 가운데 정렬된다. 상한이 없으면 초광폭 모니터에서 날짜 칸 하나가 400px가 되어
+   * 숫자 하나가 허허벌판에 놓인다.
+   */
+  --calendar-measure: 1440px;
+
+  /*
+   * 밴드 위 약화 텍스트 전용 알파.
+   *
+   * 전역 --text-secondary(0.65)를 그대로 쓰면 AA에 미달한다. 순백 배경에서
+   * 실제로 합성되는 밴드 표면색을 스크린샷 픽셀로 재면 rgb(88,88,89)이고
+   * (백색 → overlay 그라디언트 0.2~0.3 → brightness(0.62) → rgba(18,18,20,0.3)),
+   * 그 위의 0.65 흰색은 rgb(197)로 합성되어 4.10:1이다. 본문 기준 4.5:1에 못 미친다.
+   *
+   * 0.78 → rgb(219) → 5.09:1, 0.72 → rgb(208) → 4.60:1.
+   * 원칙 3("읽히지 않는 정보는 정보가 아니다")이 원칙 1과 충돌하면 이 표면에
+   * 한해 원칙 3이 이긴다는 규칙에 따라 밝기를 올렸다.
+   */
+  --calendar-muted: rgba(255, 255, 255, 0.78);
+  --calendar-faint: rgba(255, 255, 255, 0.72);
+
   position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+
+  /*
+   * 기본은 숨김. 켜는 것은 body[data-widget-type]가 하고 JS는 인라인 display를
+   * 비우기만 한다. JS가 'block'을 직접 넣으면 아래 flex 컬럼 레이아웃이 깨져
+   * 내부 스크롤 영역(min-height:0 사슬)이 성립하지 않는다.
+   */
   display: none;
-  width: 340px;
-  padding: var(--space-md);
+  flex-direction: column;
+  gap: var(--space-sm);
+
+  /*
+   * 높이 상한 + 내부 스크롤이 이 위젯의 밀도 장치다 (DD8).
+   * 배경 사진이 주인공이므로 밴드가 화면 절반을 넘지 않게 묶는다.
+   */
+  max-height: min(48vh, 480px);
+
+  /*
+   * 좌우 136px는 여백이 아니라 **자리 비움**이다.
+   *
+   * 즐겨찾기 토글(왼쪽 24~68px)과 이미지·설정 토글(오른쪽 1316~1416px)은
+   * position:fixed로 화면 모서리에 붙어 있고 z-index 100이라 밴드 위에 뜬다.
+   * 밴드를 화면 끝까지 늘리면 헤더의 화살표와 '일정 추가' 버튼이 그 아래로
+   * 깔려 눌리지 않는다. 표면은 끝까지 가되 내용은 컨트롤을 피한다.
+   *
+   * 오른쪽 묶음이 더 넓어서(100px) 그 값에 맞춰 양쪽을 같게 뒀다. 왼쪽에 남는
+   * 56px은 빈 밴드 표면으로 보여 좌우 균형이 맞는다.
+   */
+  padding: var(--space-sm) 136px var(--space-md);
+
   background: var(--bg-secondary-glass);
   backdrop-filter: blur(10px) saturate(115%) brightness(0.62);
   border: 1px solid var(--border-color);
-  border-radius: 16px;
+  border-top: 0;
+  /* 위쪽은 화면 끝에 붙으므로 아래 모서리만 둥글다 */
+  border-radius: 0 0 16px 16px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.32);
   color: var(--text-primary);
 }
 
-/*
- * width는 의도적으로 트랜지션하지 않는다. collision-compact가 폭을 바꾸는데,
- * 애니메이션 중 매 프레임 ResizeObserver가 발화해 측정이 폭주한다.
- * 축소 밀도 전환은 즉시 적용되는 편이 안전하다.
- */
-.calendar-widget.enable-transition {
-  transition: top 0.3s ease, bottom 0.3s ease, left 0.3s ease, right 0.3s ease, transform 0.3s ease;
+body[data-widget-type="calendar"] .calendar-widget {
+  display: flex;
 }
 
+/*
+ * 밴드는 움직이지 않는다. 위치 전환 트랜지션이 걸릴 대상 자체가 없어졌으므로
+ * .enable-transition 규칙도 함께 제거했다. (시계 쪽 규칙은 그대로다 — UI4)
+ */
+
 /* --- 헤더 --- */
+.calendar-header,
+.calendar-body {
+  width: 100%;
+  max-width: var(--calendar-measure);
+  margin-inline: auto;
+}
+
 .calendar-header {
   display: flex;
   align-items: center;
-  gap: var(--space-2xs);
-  margin-bottom: var(--space-sm);
+  gap: var(--space-xs);
+  /* 간격은 위젯의 flex gap이 준다 */
+  margin-bottom: 0;
+  flex-shrink: 0;
 }
 
 .calendar-title {
-  flex: 1;
-  font-size: 16px;
+  /*
+   * 전체 너비 밴드에서 제목을 flex:1로 늘려 가운데 두면 화살표가 1400px 떨어진
+   * 양끝으로 흩어진다. 내비게이션은 한 덩어리로 왼쪽에 모은다.
+   * min-width는 '9월' ↔ '12월'에서 화살표가 덜컥이는 것을 막는다.
+   */
+  flex: 0 0 auto;
+  min-width: 7.5em;
+  font-size: 18px;
   font-weight: 700;
   letter-spacing: -0.01em;
-  text-align: center;
+  text-align: left;
   color: var(--text-primary);
 }
 
@@ -749,52 +817,110 @@ body {
   outline-offset: 2px;
 }
 
+/* --- 본문: 달력 | 할 일 패널 2열 --- */
+/*
+ * 본문 자체는 스크롤하지 않는다. 두 열이 각자 스크롤한다.
+ *
+ * 여기에 overflow-y를 걸면 패널 아래쪽 입력창에 포커스가 갈 때 브라우저가
+ * 그 입력창을 보이게 하려고 본문 전체를 밀어 올린다. 그 순간 옆의 달력
+ * 첫 주가 잘려 나간다 — 할 일을 적으려 했을 뿐인데 달력이 움직인다.
+ */
+.calendar-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: var(--space-md);
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 패널이 열렸을 때만 2열이 된다. 닫혀 있으면 달력이 폭을 다 쓴다 */
+.calendar-widget.has-panel .calendar-body {
+  grid-template-columns: minmax(0, 1fr) minmax(260px, 320px);
+}
+
+/* 달력 열. 6주가 밴드 높이를 넘으면 이 열만 스크롤한다 */
+.calendar-month {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2xs);
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
 /* --- 요일 --- */
 .calendar-weekdays {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 2px;
-  margin-bottom: var(--space-2xs);
+  margin-bottom: 0;
 }
 
 .calendar-weekdays span {
-  text-align: center;
+  /* 날짜 숫자가 칸 왼쪽 위에 있으므로 요일도 왼쪽에 맞춘다 */
+  text-align: left;
+  padding-left: 7px;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-secondary);
 }
 
 /* --- 월간 그리드 (6주 고정으로 높이 점프 방지) --- */
+/*
+ * 6주가 남은 높이를 나눠 가진다. 행 높이를 고정하면 밴드 상한(48vh)보다 10~20px
+ * 넘쳐 스크롤바가 생기고, 마지막 주가 반쯤 잘린 채로 보인다. 늘어나고 줄어들게
+ * 두면 창 높이가 어떻든 6주가 항상 한눈에 들어온다.
+ */
 .calendar-grid {
   display: flex;
   flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
   gap: 2px;
 }
 
+/*
+ * `1 0 auto` — 남는 높이는 나눠 갖되 **줄어들지는 않는다.**
+ * `1 1 0`으로 두면 flex가 기준 높이를 0으로 보고 칸 내용(min-height 56px)
+ * 아래로 찌그러뜨려, 6주가 40px씩으로 눌리고 숫자와 칩이 서로 겹친다.
+ */
 .calendar-row {
   display: grid;
   grid-template-columns: repeat(7, 1fr);
   gap: 2px;
+  flex: 1 0 auto;
 }
 
+/*
+ * 밴드에서 칸은 가로로 넓다. 숫자를 가운데 두면 넓은 빈 칸 한가운데 숫자 하나가
+ * 떠 있는 꼴이 되므로 왼쪽 위로 올리고, 칩이 아래 폭을 다 쓰게 한다.
+ */
 .calendar-day {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  min-height: 44px;
-  padding: 2px;
+  align-items: stretch;
+  justify-content: flex-start;
+  gap: 4px;
+  /*
+   * 52px. 6주 × 52 + 행 간격 10px = 322px으로, 900px 창의 밴드 상한(48vh=432px)
+   * 안에 헤더·요일까지 넣고도 남는다. 56px이면 10px 넘쳐 스크롤바가 생기고
+   * 마지막 주가 잘린다. 44px 터치 타깃 요건은 그대로 넘긴다.
+   */
+  min-height: 52px;
+  padding: 5px 6px 6px;
   background: transparent;
   border: 1px solid transparent;
   border-radius: 8px;
   color: var(--text-primary);
   font-family: inherit;
+  text-align: left;
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
 
 .calendar-day-num {
+  align-self: flex-start;
   font-size: 13px;
   font-weight: 500;
   line-height: 1;
@@ -814,11 +940,14 @@ body {
 }
 
 /*
- * 0.45 미만으로 낮추지 말 것. 이 표면(brightness 0.62가 적용된 글래스) 위에서
- * 0.28은 약 2.5:1로 WCAG AA(4.5:1)에 미달한다. 0.45가 약 4.6:1로 하한선이다.
+ * 이웃 달 날짜. --calendar-faint 아래로 낮추지 말 것.
+ *
+ * 오랫동안 0.45였고 주석은 "약 4.6:1"이라고 적혀 있었다. 순백 배경에서 렌더된
+ * 픽셀을 실제로 재 보니 **2.83:1**이었다 — 계산이 표면색을 잘못 잡고 있었다.
+ * 0.72가 4.60:1로 실측 하한선이다. 안쪽 달(0.95, 6.62:1)과는 여전히 구분된다.
  */
 .calendar-day.is-outside .calendar-day-num {
-  color: rgba(255, 255, 255, 0.45);
+  color: var(--calendar-faint);
 }
 
 .calendar-day.is-today {
@@ -846,45 +975,118 @@ body {
   font-weight: 700;
 }
 
-/* --- 이벤트 인디케이터 --- */
-.calendar-dots {
+/*
+ * --- 범위 칩 ---
+ *
+ * 칩 하나가 두 가지를 동시에 말한다.
+ *
+ * 1. 범위에서의 위치 → **모서리 모양**. 하루짜리는 양끝이 둥글고, 시작은 왼쪽만,
+ *    끝은 오른쪽만 둥글며, 중간은 양끝이 각져 좌우 칸으로 이어져 보인다.
+ * 2. 중요도 → **두께 3단계**(3/4/7px)와 같은 hue의 알파 단계.
+ *
+ * 중요도에 새 색을 만들지 않는 것이 핵심 제약이다. 기존 화면에 이미
+ * accent(파랑) · overdue(빨강) · soon(주황) 3계열이 깔려 있어서, 중요도 3색을
+ * 더하면 한 화면에 6계열이 되어 "알록달록한 위젯 모음" anti-reference에
+ * 정면으로 걸린다. 그래서 1차 부호는 색이 아니라 두께다 — 화면을 회색조로
+ * 낮춰도 중요도가 그대로 읽힌다.
+ */
+.calendar-chips {
   display: flex;
-  align-items: center;
-  gap: 3px;
-  height: 5px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  min-width: 0;
 }
 
-.calendar-dot {
-  width: 4px;
+.calendar-chip {
+  /* 마감 상태가 hue를, 중요도가 두께와 진하기를 정한다 */
+  --chip-hue: var(--calendar-accent);
+  --chip-strength: 0.78;
+
   height: 4px;
-  border-radius: 50%;
-  background: var(--calendar-accent);
+  border-radius: 0;
+  background: var(--chip-hue);
+  opacity: var(--chip-strength);
 }
 
-.calendar-dot.is-done {
-  background: rgba(255, 255, 255, 0.3);
+/* 범위에서의 위치 = 모서리 모양. 네 가지가 한 세트다 */
+.calendar-chip.is-single {
+  border-radius: 999px;
 }
 
-.calendar-day.is-due-overdue .calendar-dot:not(.is-done) {
-  background: var(--calendar-overdue);
+.calendar-chip.is-start {
+  border-radius: 999px 0 0 999px;
 }
 
-.calendar-day.is-due-soon .calendar-dot:not(.is-done) {
-  background: var(--calendar-soon);
+.calendar-chip.is-end {
+  border-radius: 0 999px 999px 0;
 }
 
-.calendar-dot-more {
+/* 양끝이 각져 좌우 칸으로 이어져 보인다. 기본값과 같지만 명시해 둔다 —
+   네 상태 중 하나만 규칙이 없으면 읽는 사람이 빠뜨린 건지 의도인지 알 수 없다 */
+.calendar-chip.is-middle {
+  border-radius: 0;
+}
+
+/* 중요도 = 두께 (1차) + 진하기 (2차). 0.55는 DESIGN.md가 정한 알파 하한 */
+.calendar-chip.is-priority-low {
+  height: 3px;
+  --chip-strength: 0.55;
+}
+
+.calendar-chip.is-priority-normal {
+  height: 4px;
+  --chip-strength: 0.78;
+}
+
+.calendar-chip.is-priority-high {
+  height: 7px;
+  --chip-strength: 1;
+}
+
+/* 마감 상태 = hue. 세 계열 모두 기존 토큰이고 새로 만든 색이 없다 */
+.calendar-chip.is-due-overdue {
+  --chip-hue: var(--calendar-overdue);
+}
+
+.calendar-chip.is-due-soon {
+  --chip-hue: var(--calendar-soon);
+}
+
+/* 완료는 색을 잃고 회색으로 물러난다. 두께는 유지해 범위는 계속 읽힌다 */
+.calendar-chip.is-done {
+  --chip-hue: rgba(255, 255, 255, 0.32);
+  --chip-strength: 1;
+}
+
+.calendar-chip-more {
   font-size: 10px;
   font-weight: 600;
-  line-height: 1;
+  line-height: 1.4;
   color: var(--text-secondary);
 }
 
 /* --- 할 일 패널 (하단 펼침) --- */
+/*
+ * 밴드에서는 달력 오른쪽 열에 선다. 아래로 쌓으면 밴드 높이가 두 배가 되고
+ * 그만큼 배경 사진을 더 가린다.
+ */
 .calendar-panel {
-  margin-top: var(--space-sm);
-  padding-top: var(--space-sm);
-  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin-top: 0;
+  padding-top: 0;
+  padding-left: var(--space-md);
+  /*
+   * 오른쪽 12px는 닫기·삭제 버튼의 히트 영역(::before inset -10px) 자리다.
+   * 없으면 열 경계 밖으로 삐져나가 밴드의 overflow:hidden에 잘린다 —
+   * 눈에는 안 보여도 클릭 영역이 그만큼 깎이고, 목록에는 2px짜리 가로
+   * 스크롤바가 남는다.
+   */
+  padding-right: 12px;
+  border-top: 0;
+  border-left: 1px solid var(--border-color);
 }
 
 .calendar-panel[hidden] {
@@ -937,10 +1139,19 @@ body {
   outline-offset: 2px;
 }
 
+/*
+ * 고정 max-height 대신 남는 높이를 다 쓰고 넘치면 스크롤한다. 밴드 높이 상한이
+ * 이미 전체를 묶고 있어서, 여기서 또 132px로 자르면 옆의 달력이 6주를 다 보여주는
+ * 동안 패널만 이유 없이 짧아진다.
+ */
 .calendar-todo-list {
   list-style: none;
-  max-height: 132px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
+  /* 삭제 버튼의 히트 영역(::before inset -10px)이 들어갈 자리. 없으면 목록에
+     2px짜리 가로 스크롤바가 생긴다 */
+  padding-right: 10px;
   margin-bottom: var(--space-xs);
 }
 
@@ -1167,114 +1378,398 @@ body {
   pointer-events: none;
 }
 
-/* --- 달력 위치 클래스 --- */
-.calendar-widget.position-top-left {
-  top: 120px;
-  left: 280px;
-  transform: translate(0, 0);
-}
-.calendar-widget.position-top-center {
-  top: 120px;
-  left: 50%;
-  transform: translate(-50%, 0);
-}
-.calendar-widget.position-top-right {
-  top: 120px;
-  left: calc(100% - 40px);
-  transform: translate(-100%, 0);
-}
-.calendar-widget.position-center-left {
-  top: 50%;
-  left: 280px;
-  transform: translate(0, -50%);
-}
-.calendar-widget.position-center-center {
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-}
-.calendar-widget.position-center-right {
-  top: 50%;
-  left: calc(100% - 40px);
-  transform: translate(-100%, -50%);
-}
-.calendar-widget.position-bottom-left {
-  top: calc(100% - 120px);
-  left: 280px;
-  transform: translate(0, -100%);
-}
-.calendar-widget.position-bottom-center {
-  top: calc(100% - 120px);
-  left: 50%;
-  transform: translate(-50%, -100%);
-}
-.calendar-widget.position-bottom-right {
-  top: calc(100% - 120px);
-  left: calc(100% - 40px);
-  transform: translate(-100%, -100%);
+/*
+ * 달력 위치 클래스와 축소 밀도 규칙은 **의도적으로 제거했다.**
+ *
+ * 달력은 이제 상단 전체 너비 밴드다. 고를 위치가 없으므로 `position-*` 9종과
+ * 그 `overlap-offset` 변형이 의미를 잃었고, 남겨 두면 JS가 여전히 붙이는
+ * `position-*` 클래스가 밴드의 inset을 덮어 위치를 바꿀 때마다 밴드가 흔들린다.
+ * 규칙을 지우는 것이 그 경합을 없애는 유일한 방법이다.
+ *
+ * `collision-compact`(폭 296px 축소)도 같은 이유로 사라졌다. 폭이 100%라 줄일
+ * 폭이 없다. 밀도 문제는 밴드 max-height + 내부 스크롤이 대신 푼다 (DD8).
+ *
+ * 시계의 position-* / overlap-offset 규칙은 그대로 남아 있다 (UI4).
+ * mainWidgetPosition 저장값도 읽지도 쓰지도 않으므로 시계로 되돌리면 이전
+ * 위치가 그대로 복원된다 (DD4).
+ */
+
+/*
+ * 밴드가 떠 있을 때 상단 검색창만 그 높이만큼 내려온다 (DD3).
+ *
+ * 검색창의 9위치 설정은 그대로 남는다 — 밴드가 생겼다고 사용자가 이미 고른
+ * 배치를 빼앗지 않는다. 부딪히는 것은 top-* 3종뿐이므로 그 셋만 비킨다.
+ *
+ * `body.has-calendar-band`는 JS의 updateBandMetrics()가 --calendar-band-height와
+ * 함께 켜고 끈다. 변수 유무로만 판단하면 달력을 껐을 때 fallback 0px이 적용되어
+ * 검색창이 원래 자리(120px)보다 위로 올라가 버린다.
+ */
+body.has-calendar-band .search-container.position-top-left,
+body.has-calendar-band .search-container.position-top-center,
+body.has-calendar-band .search-container.position-top-right {
+  top: calc(var(--calendar-band-height, 0px) + var(--space-lg));
 }
 
 /*
- * 겹침 시 달력 오프셋.
- * 달력은 약 360px로 시계(약 144px)보다 훨씬 크므로 시계용 ±80px 오프셋을 재사용할 수 없다.
+ * 고정 즐겨찾기는 밴드 아래로 내려온다.
+ *
+ * 이 목록은 화면 좌상단에 세로로 서 있어서(기본 top 84px) 밴드가 켜지면 달력
+ * 그리드 위에 그대로 겹친다. 코너 토글과 달리 세로로 길어 밴드 안쪽 여백으로는
+ * 비켜 줄 수 없다.
  */
-.calendar-widget.overlap-offset.position-top-left {
-  top: 300px;
-  transform: translate(0, -50%);
-}
-.calendar-widget.overlap-offset.position-top-center {
-  top: 300px;
-  transform: translate(-50%, -50%);
-}
-.calendar-widget.overlap-offset.position-top-right {
-  top: 300px;
-  transform: translate(-100%, -50%);
-}
-.calendar-widget.overlap-offset.position-center-left {
-  top: calc(50% - 150px);
-  transform: translate(0, -50%);
-}
-.calendar-widget.overlap-offset.position-center-center {
-  top: calc(50% - 150px);
-  transform: translate(-50%, -50%);
-}
-.calendar-widget.overlap-offset.position-center-right {
-  top: calc(50% - 150px);
-  transform: translate(-100%, -50%);
-}
-.calendar-widget.overlap-offset.position-bottom-left {
-  top: calc(100% - 300px);
-  transform: translate(0, -50%);
-}
-.calendar-widget.overlap-offset.position-bottom-center {
-  top: calc(100% - 300px);
-  transform: translate(-50%, -50%);
-}
-.calendar-widget.overlap-offset.position-bottom-right {
-  top: calc(100% - 300px);
-  transform: translate(-100%, -50%);
+body.has-calendar-band .pinned-bookmarks {
+  top: calc(var(--calendar-band-height, 0px) + var(--space-sm));
 }
 
-/* 실측 충돌 시 축소 밀도 */
-.calendar-widget.collision-compact {
-  width: 296px;
-  padding: 10px;
+/* --- 요약 한 줄 --- */
+/*
+ * 문장 한 줄이다. 카드도 타일도 진행률 바도 아니다. 셀 것이 없으면 JS가 노드를
+ * 지우므로 "0건" 상태를 위한 스타일은 존재하지 않는다.
+ */
+.calendar-summary {
+  margin-left: auto;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.calendar-widget.collision-compact .calendar-day {
-  min-height: 34px;
-}
-
-.calendar-widget.collision-compact .calendar-day-num {
+/* --- 일정 추가 (상세 경로 진입) --- */
+.calendar-detail-add {
+  position: relative;
+  flex-shrink: 0;
+  /* 요약이 없을 때도 오른쪽 끝에 붙어 있어야 한다 */
+  margin-left: auto;
+  height: 28px;
+  padding: 0 12px;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font-family: inherit;
   font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
 }
 
-.calendar-widget.collision-compact .calendar-todo-list {
-  max-height: 88px;
+/* 요약이 있으면 그쪽이 밀어내는 역할을 맡는다 */
+.calendar-summary + .calendar-detail-add {
+  margin-left: var(--space-sm);
 }
 
-.calendar-widget.collision-compact .calendar-title {
+.calendar-detail-add::before {
+  content: '';
+  position: absolute;
+  inset: -8px;
+}
+
+.calendar-detail-add:hover {
+  background: var(--hover-bg);
+  border-color: rgba(255, 255, 255, 0.2);
+  color: var(--text-primary);
+}
+
+.calendar-detail-add:focus-visible {
+  outline: 2px solid var(--calendar-accent);
+  outline-offset: 2px;
+}
+
+/* --- Shift+방향키로 잡는 중인 범위 --- */
+.calendar-day.is-in-range {
+  background: rgba(126, 160, 245, 0.14);
+}
+
+/* 범위의 양끝은 안쪽 모서리를 각지게 해서 한 덩어리로 읽히게 한다 */
+.calendar-day.is-in-range + .calendar-day.is-in-range {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.calendar-day.is-in-range:has(+ .calendar-day.is-in-range) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+/* --- 할 일 항목: 제목 + 기간/중요도 + 메모 --- */
+.calendar-todo-item {
+  /* 본문이 여러 줄이 될 수 있으므로 위쪽 정렬로 바꾼다 */
+  align-items: flex-start;
+}
+
+.calendar-todo-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.calendar-todo-meta {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--calendar-faint);
+}
+
+.calendar-todo-note {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--calendar-muted);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  /* 메모는 목록에서 두 줄까지만 보여주고 나머지는 편집에서 읽는다 */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.calendar-todo-edit {
+  position: relative;
+  flex-shrink: 0;
+  padding: 2px 6px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+
+.calendar-todo-edit::before {
+  content: '';
+  position: absolute;
+  inset: -10px;
+}
+
+/* 마우스가 없으면 드러나지 않으므로 포커스에도 같이 드러낸다 */
+.calendar-todo-item:hover .calendar-todo-edit,
+.calendar-todo-edit:focus-visible {
+  opacity: 1;
+}
+
+.calendar-todo-edit:hover {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+}
+
+.calendar-todo-edit:focus-visible {
+  outline: 2px solid var(--calendar-accent);
+  outline-offset: 1px;
+}
+
+/* --- 일정 상세 모달 --- */
+/*
+ * 날짜 두 칸이 나란히 서야 해서 기본 모달(400px)보다 넓다.
+ */
+.calendar-event-modal {
+  max-width: 520px;
+  max-height: 88vh;
+  overflow-y: auto;
+}
+
+.calendar-event-modal .field-label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.calendar-event-modal input[type='text'],
+.calendar-event-modal input[type='date'],
+.calendar-event-modal textarea {
+  width: 100%;
+  padding: 12px 14px;
+  margin-bottom: var(--space-md);
+  background: var(--bg-primary-glass);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  color: var(--text-primary);
+  font-family: inherit;
   font-size: 14px;
+  outline: none;
+  transition: border-color var(--transition-speed), box-shadow var(--transition-speed);
+}
+
+/* 네이티브 날짜 선택기를 다크로 그리게 한다. 없으면 흰 팝업이 튀어나온다 */
+.calendar-event-modal input[type='date'] {
+  color-scheme: dark;
+}
+
+.calendar-event-modal textarea {
+  resize: vertical;
+  min-height: 88px;
+  line-height: 1.6;
+  margin-bottom: 4px;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.calendar-event-modal input:focus,
+.calendar-event-modal textarea:focus {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px rgba(100, 150, 255, 0.1);
+}
+
+.calendar-event-modal input::placeholder,
+.calendar-event-modal textarea::placeholder {
+  color: var(--text-secondary);
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--space-sm);
+}
+
+.field-col {
+  min-width: 0;
+}
+
+.field-group {
+  margin-bottom: var(--space-md);
+  padding: 0;
+  border: none;
+}
+
+/* 설정의 세그먼트 컨트롤과 같은 어휘를 쓴다 */
+.priority-segment {
+  display: inline-flex;
+  gap: 2px;
+  padding: 3px;
+  background: var(--bg-primary-glass);
+  border: 1px solid var(--border-color);
+  border-radius: 9px;
+}
+
+.priority-option {
+  position: relative;
+}
+
+/*
+ * 라디오는 눈에서만 감추고 포커스는 살려 둔다. display:none으로 지우면
+ * 키보드로 중요도를 고를 수 없다.
+ *
+ * 셀렉터에 .calendar-event-modal을 붙인 이유: 파일 뒤쪽의 `.modal-content input`이
+ * 같은 specificity(0,1,1)라 순서로 이겨 width:100%/padding을 다시 씌운다.
+ */
+.calendar-event-modal .priority-option input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  opacity: 0;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+}
+
+.priority-option span {
+  display: block;
+  padding: 6px 14px;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.priority-option:hover span {
+  color: var(--text-primary);
+}
+
+.priority-option input:checked + span {
+  background: rgba(88, 128, 230, 0.22);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.priority-option input:focus-visible + span {
+  outline: 2px solid var(--calendar-accent);
+  outline-offset: 2px;
+}
+
+.field-hint {
+  min-height: 16px;
+  margin-bottom: var(--space-sm);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.field-error {
+  margin-bottom: var(--space-sm);
+  padding: 10px 12px;
+  background: rgba(255, 99, 92, 0.16);
+  border: 1px solid rgba(255, 99, 92, 0.42);
+  border-radius: 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-primary);
+}
+
+.field-error[hidden] {
+  display: none;
+}
+
+.btn-danger {
+  flex: 0 0 auto;
+  padding: 12px 16px;
+  background: transparent;
+  border: 1px solid rgba(255, 99, 92, 0.42);
+  border-radius: 10px;
+  color: var(--calendar-overdue);
+  font-family: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.btn-danger:hover {
+  background: rgba(255, 99, 92, 0.16);
+  border-color: rgba(255, 99, 92, 0.6);
+}
+
+.btn-danger:focus-visible {
+  outline: 2px solid var(--calendar-overdue);
+  outline-offset: 2px;
+}
+
+.btn-danger[hidden] {
+  display: none;
+}
+
+/*
+ * --- 밴드 위 약화 텍스트의 대비 보정 ---
+ *
+ * 전역 --text-secondary(0.65)는 밝은 배경 위 밴드 표면에서 4.10:1로 AA에 미달한다
+ * (근거는 .calendar-widget의 --calendar-muted 주석). 규칙을 하나씩 고치는 대신
+ * 여기 한 곳에 모은다 — 목록이 한 군데 있어야 새 규칙을 추가할 때 전역 토큰을
+ * 다시 집어 드는 실수를 알아챌 수 있다.
+ *
+ * 이 블록은 위 규칙들보다 **뒤에** 있어야 한다 (같은 specificity라 순서로 이긴다).
+ * 모달은 대상이 아니다 — rgba(0,0,0,0.7) 스크림 위라 표면이 훨씬 어둡다.
+ */
+.calendar-nav,
+.calendar-today,
+.calendar-weekdays span,
+.calendar-chip-more,
+.calendar-panel-close,
+.calendar-todo-empty,
+.calendar-todo-toggle,
+.calendar-todo-delete,
+.calendar-todo-edit,
+.calendar-summary,
+.calendar-detail-add {
+  color: var(--calendar-muted);
 }
 
 /* ===== 검색바 ===== */
@@ -2113,10 +2608,27 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
     font-size: 108px;
   }
 
-  .calendar-widget.position-top-left,
-  .calendar-widget.position-center-left,
-  .calendar-widget.position-bottom-left {
-    left: 80px;
+  /* 코너 토글은 이 폭에서도 24px/44px 그대로다 — 자리 비움을 줄이지 않는다 */
+  .calendar-widget {
+    padding-top: var(--space-xs);
+    padding-bottom: var(--space-sm);
+  }
+}
+
+/*
+ * 패널을 옆에 세울 가로 여유가 없어지는 지점. 아래로 쌓되 구분선을 위쪽으로 옮긴다.
+ * 밴드 max-height가 그대로 걸려 있으므로 높이는 늘지 않고 내부 스크롤이 받는다.
+ */
+@media (max-width: 860px) {
+  .calendar-widget.has-panel .calendar-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .calendar-panel {
+    padding-left: 0;
+    padding-top: var(--space-sm);
+    border-left: 0;
+    border-top: 1px solid var(--border-color);
   }
 }
 
@@ -2205,26 +2717,27 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
     width: 280px;
   }
 
-  /* 모바일 폭에서는 달력을 축소 밀도로 고정 */
+  /*
+   * 좁은 폭에서는 밴드를 눌러 배경을 더 남긴다. 폭을 줄이는 것이 아니라
+   * (밴드는 항상 전체 너비다) 칸 높이와 여백을 줄인다.
+   */
+  /*
+   * 이 폭에서는 코너 토글이 40px로 줄고 16px 여백에 붙는다
+   * (오른쪽 묶음 16~108px). 자리 비움도 그만큼 줄인다.
+   */
   .calendar-widget {
-    width: 296px;
-    padding: 10px;
+    max-height: min(56vh, 420px);
+    padding: var(--space-xs) 120px var(--space-sm);
   }
 
   .calendar-widget .calendar-day {
-    min-height: 36px;
+    min-height: 40px;
+    padding: 4px;
   }
 
-  .calendar-widget.position-top-left,
-  .calendar-widget.position-center-left,
-  .calendar-widget.position-bottom-left {
-    left: 16px;
-  }
-
-  .calendar-widget.position-top-right,
-  .calendar-widget.position-center-right,
-  .calendar-widget.position-bottom-right {
-    left: calc(100% - 16px);
+  .calendar-title {
+    font-size: 16px;
+    min-width: 6.5em;
   }
 }
 
@@ -2240,8 +2753,26 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
   .calendar-todo-delete,
   .calendar-todo-input,
   .calendar-todo-add,
+  .calendar-todo-edit,
+  .calendar-detail-add,
+  .priority-option span,
+  .calendar-event-modal input,
+  .calendar-event-modal textarea,
   .segment-option,
   .btn-compact {
     transition-duration: 0.01ms;
+  }
+
+  /*
+   * 편집 버튼은 hover로만 드러난다. 전환을 0으로 만드는 것만으로는 부족하고,
+   * 포인터를 못 쓰는 환경에서는 아예 항상 보이는 편이 낫다.
+   */
+  .calendar-todo-edit {
+    opacity: 1;
+  }
+
+  /* 기본 버튼의 들어올림도 뺀다 — 위치 변화는 모션 민감도에서 가장 거슬리는 축이다 */
+  .btn-primary:hover {
+    transform: none;
   }
 }
