@@ -11,3 +11,72 @@
 /banner-overlay.png
 
 # 계획·리뷰 기록·PRD·리포트는 산출물이므로 추적한다.
+
+# >>> mccp runtime artifacts — managed by /mccp:setup >>>
+# managed by /mccp:setup (mccp 1.30.0)
+# Lines between these markers are REPLACED on the next /mccp:setup run.
+# Put your own rules OUTSIDE the markers — everything out there is preserved.
+# Receipt chain — plan/implement receipts are session diagnostics (working-tree
+# only); ship receipts (mccp-pr-codex) are the audit corpus and stay tracked.
+# ORDER IS LOAD-BEARING: the negation must follow the ignore, and the lock/tmp
+# re-ignores must follow the negation.
+.claude/receipts/*
+!.claude/receipts/mccp-pr-codex/
+.claude/receipts/mccp-pr-codex/*.lock
+.claude/receipts/mccp-pr-codex/*.tmp
+
+# Session-local counters and advisory locks. STATE.md / fix-task.md stay tracked.
+.claude/state/loop-counter.json
+.claude/state/orchestration-runaway.json
+.claude/state/orchestration-runaway.json.debt/
+.claude/state/*.lock
+
+# completion-ledger entries ARE tracked; only the per-entry lock/tmp are local.
+# The single-level glob above does not reach this subdir.
+.claude/state/completion-ledger/*.lock
+.claude/state/completion-ledger/*.tmp
+
+# Per-session runtime state — never committed.
+.claude/state/evidence-claims/
+.claude/state/dispatches/
+# The M5 state journal is working-tree only on purpose: STATE.md stays tracked
+# and a fresh clone bootstraps the journal from it as a genesis checkpoint, so
+# committing a per-session-append JSONL would only add a conflict surface.
+.claude/state/journal/
+.claude/state/plan-review/
+.claude/state/session-ledgers/
+.claude/state/santa-loop/
+.claude/state/session-processes/
+.claude/state/msw-events/
+.claude/state/codex-stop-loop-input.txt
+.claude/state/auto-handoff-log.jsonl
+.claude/state/m3-friction-events.jsonl
+.claude/state/hook-caps.json
+.claude/state/*.env-snapshot.json
+.claude/state/*.handoff-items.json
+
+# hook-trace shards. NOT root-anchored: a hook whose cwd is a nested package
+# writes its shards under that package's own .claude/.
+**/.claude/state/hook-trace/
+
+# derive cache — per-session/per-machine.
+.claude/cache/
+
+# ultracode delegation sidecar journal (per-task local audit).
+*.delegations.jsonl
+
+# impeccable tool byproducts. design.json is the shared design-direction config.
+.impeccable/*
+!.impeccable/design.json
+
+# mccp worktree convention (CLAUDE.md §3.8).
+.worktrees/
+
+# This provisioner's own byproducts. The advisory lock and the atomic tmp are
+# transient, but a crash leaves them behind; the .bak persists by
+# design and is a verbatim copy of the pre-run file. A tool whose purpose is to
+# keep runtime artifacts out of git must not exempt its own.
+.gitignore.lock
+.gitignore.bak
+.gitignore.*.tmp
+# <<< mccp runtime artifacts — managed by /mccp:setup <<<
