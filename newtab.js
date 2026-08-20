@@ -981,7 +981,14 @@ class BookmarkManager {
     // 삭제 버튼
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'bookmark-delete';
-    deleteBtn.textContent = '×';
+    // 글리프('×') 대신 SVG를 담는다. 문자로 그리면 모양과 굵기가 본문 폰트에
+    // 매이고, 접근성 이름도 '×'가 되어 읽어 주는 쪽에서 무슨 버튼인지 알 수 없다.
+    deleteBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+      <line x1="18" y1="6" x2="6" y2="18"></line>
+      <line x1="6" y1="6" x2="18" y2="18"></line>
+    </svg>`;
+    deleteBtn.title = '삭제';
+    deleteBtn.setAttribute('aria-label', `${bookmark.name} 삭제`);
     deleteBtn.onclick = (e) => {
       e.preventDefault();
       this.deleteBookmark(index);
@@ -1534,7 +1541,12 @@ class ImageManager {
 
     const deleteBtn = document.createElement('button');
     deleteBtn.className = 'image-delete';
-    deleteBtn.textContent = '×';
+    deleteBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+      <line x1="18" y1="6" x2="6" y2="18"></line>
+      <line x1="6" y1="6" x2="18" y2="18"></line>
+    </svg>`;
+    deleteBtn.title = '이미지 삭제';
+    deleteBtn.setAttribute('aria-label', `이미지 ${index + 1} 삭제`);
     deleteBtn.onclick = (e) => {
       e.stopPropagation();
       this.deleteImage(index);
@@ -2938,7 +2950,10 @@ class CalendarManager {
     remove.className = 'calendar-todo-delete';
     remove.dataset.todoAction = 'delete';
     remove.setAttribute('aria-label', `${event.title} 삭제`);
-    remove.textContent = '×';
+    remove.innerHTML = `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+      <line x1="18" y1="6" x2="6" y2="18"></line>
+      <line x1="6" y1="6" x2="18" y2="18"></line>
+    </svg>`;
     item.appendChild(remove);
 
     return item;

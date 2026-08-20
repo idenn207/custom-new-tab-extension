@@ -4,7 +4,7 @@
 
 ## 기능
 
-- ⏰ **실시간 시계**: HH:mm 형식으로 표시 (Nanum Gothic 폰트)
+- ⏰ **실시간 시계**: HH:mm 형식으로 표시 (고정폭 숫자라 분이 바뀌어도 폭이 흔들리지 않습니다)
 - 🗓️ **업무 달력**: 메인 위젯을 시계 대신 달력으로 전환. 상단 전체 너비 밴드에 월간 그리드 + 기간 일정 + 중요도 + 작업 메모
 - 🔍 **통합 검색**: Google 검색 및 URL 직접 입력
 - ⭐ **즐겨찾기**: 좌측 collapse 메뉴, 고정 기능 지원
@@ -205,13 +205,15 @@ constructor(sidebar, toggleBtn, backgroundManager) {
 
 ### 시계 폰트 크기 변경
 
-`newtab.css` 파일의 `.time` 클래스:
+`newtab.css`의 `:root` 토큰을 바꿉니다. `.time` 규칙은 이 토큰만 읽으므로 한 곳만 고치면 됩니다.
 
 ```css
-.time {
-  font-size: 144px; /* 원하는 크기로 변경 */
+:root {
+  --text-display: 9rem; /* 144px. 원하는 크기로 변경 */
 }
 ```
+
+좁은 화면용 값은 파일 아래쪽 반응형 블록에서 같은 토큰을 덮습니다 (≤1024px에서 `6.75rem`, ≤768px에서 `5rem`).
 
 ## 파일 구조
 
@@ -221,6 +223,9 @@ my-newtab-extension/
 ├── newtab.html         # HTML 구조
 ├── newtab.css          # 스타일링
 ├── newtab.js           # 기능 구현
+├── fonts/              # 번들 폰트 (화면 전체가 이 하나를 쓴다)
+│   ├── PretendardVariable.woff2
+│   └── OFL.txt         # SIL Open Font License 1.1
 ├── test/               # 위치 회귀 스모크 하네스 (의존성 0)
 │   ├── positioning.smoke.html
 │   └── positioning.smoke.js
@@ -281,7 +286,7 @@ my-newtab-extension/
 - Chrome Extensions Manifest V3
 - Chrome Storage API
 - CSS3 (Grid, Flexbox, Backdrop Filter)
-- Google Fonts (Nanum Gothic)
+- Pretendard Variable (확장 패키지에 번들, 네트워크 요청 없음)
 
 ## SOLID 원칙 적용
 

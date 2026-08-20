@@ -1,0 +1,343 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-08-20T11:36:22Z",
+  "title": "Design System: 배경 사진 새 탭",
+  "extensions": {
+    "colorMeta": {
+      "glass-light": {
+        "role": "neutral",
+        "displayName": "옅은 유리",
+        "canonical": "rgba(18, 18, 20, 0.3)",
+        "tonalRamp": ["#050506", "#0C0C0E", "#121214", "#1D1D21", "#33333A", "#55555E", "#89898F", "#C6C6CB"]
+      },
+      "glass-deep": {
+        "role": "neutral",
+        "displayName": "진한 유리",
+        "canonical": "rgba(12, 12, 14, 0.5)",
+        "tonalRamp": ["#040405", "#0C0C0E", "#16161A", "#212126", "#38383F", "#5A5A63", "#8D8D95", "#C8C8CD"]
+      },
+      "panel-solid": {
+        "role": "neutral",
+        "displayName": "불투명 판",
+        "canonical": "rgba(12, 12, 14, 0.92)",
+        "tonalRamp": ["#040405", "#0C0C0E", "#16161A", "#212126", "#38383F", "#5A5A63", "#8D8D95", "#C8C8CD"]
+      },
+      "modal-scrim": {
+        "role": "neutral",
+        "displayName": "모달 스크림",
+        "canonical": "rgba(0, 0, 0, 0.7)",
+        "tonalRamp": ["#000000", "#0D0D0D", "#1A1A1A", "#333333", "#4D4D4D", "#737373", "#A6A6A6", "#D9D9D9"]
+      },
+      "single-hue-accent": {
+        "role": "primary",
+        "displayName": "유일한 hue",
+        "canonical": "rgba(88, 128, 230, 0.5)",
+        "tonalRamp": ["#0A1024", "#131E44", "#1D2E68", "#28408F", "#3557B8", "#5880E6", "#8AA8F0", "#C3D2F8"]
+      },
+      "single-hue-accent-forward": {
+        "role": "primary",
+        "displayName": "유일한 hue (전면)",
+        "canonical": "rgb(100, 150, 255)",
+        "tonalRamp": ["#0B1226", "#152249", "#20346F", "#2C4897", "#3C61C2", "#6496FF", "#96BAFF", "#CBDCFF"]
+      },
+      "focus-ring": {
+        "role": "tertiary",
+        "displayName": "포커스 링",
+        "canonical": "rgba(126, 160, 245, 0.95)",
+        "tonalRamp": ["#0D1424", "#172444", "#223668", "#2E4A8F", "#3F62B8", "#5C82DD", "#7EA0F5", "#B9CBFA"]
+      },
+      "danger": {
+        "role": "tertiary",
+        "displayName": "위험",
+        "canonical": "#ff3b30",
+        "tonalRamp": ["#2E0906", "#521310", "#7A1D18", "#A32721", "#CC322A", "#FF3B30", "#FF7A72", "#FFB8B3"]
+      },
+      "text-on-glass": {
+        "role": "neutral",
+        "displayName": "표면 위의 본문",
+        "canonical": "rgba(255, 255, 255, 0.95)",
+        "tonalRamp": ["#262626", "#404040", "#595959", "#737373", "#8C8C8C", "#A6A6A6", "#D9D9D9", "#FFFFFF"]
+      },
+      "text-on-glass-muted": {
+        "role": "neutral",
+        "displayName": "약화된 텍스트",
+        "canonical": "rgba(255, 255, 255, 0.65)",
+        "tonalRamp": ["#262626", "#404040", "#595959", "#737373", "#8C8C8C", "#A6A6A6", "#D9D9D9", "#FFFFFF"]
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "실선 한 올",
+        "canonical": "rgba(255, 255, 255, 0.08)",
+        "tonalRamp": ["#262626", "#404040", "#595959", "#737373", "#8C8C8C", "#A6A6A6", "#D9D9D9", "#FFFFFF"]
+      },
+      "hover-wash": {
+        "role": "neutral",
+        "displayName": "호버 워시",
+        "canonical": "rgba(255, 255, 255, 0.06)",
+        "tonalRamp": ["#262626", "#404040", "#595959", "#737373", "#8C8C8C", "#A6A6A6", "#D9D9D9", "#FFFFFF"]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "시계 하나뿐. 이 시스템에서 유일하게 큰 글자이며, 반응형에서 --text-display 토큰째로 108px / 80px로 덮인다."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "표면 제목 — 사이드바 h2, 모달 h2/h3."
+      },
+      "section": {
+        "displayName": "Section",
+        "purpose": "섹션 제목과 검색 입력."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "본문·라벨·버튼. body의 기본값이다. 이 화면의 텍스트는 대부분 라벨이거나 컨트롤 안의 짧은 문구여서 밀집 화면의 본문 크기가 곧 기본값이 된다."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "설정 탭, 세그먼트 옵션. medium(500)이 라벨을 본문과 갈라 놓는 유일한 신호다."
+      },
+      "caption": {
+        "displayName": "Caption",
+        "purpose": "보조 설명, 컨트롤 안 라벨. 이것이 하한이며 9px 라벨을 만들지 않는다."
+      }
+    },
+    "glass": [
+      {
+        "name": "glass-standard",
+        "value": "backdrop-filter: blur(10px)",
+        "purpose": "표준 유리. 배경·경계선과 함께 세 가지가 모두 와야 성립한다."
+      },
+      {
+        "name": "glass-readable",
+        "value": "backdrop-filter: blur(10px) brightness(0.62)",
+        "purpose": "본문 텍스트를 담는 유리. 흰 사진 위 sRGB 183을 112로 눌러 0.95 텍스트를 4.65:1로 올린다. 현재 달력 밴드와 저장소 고지 배너에만 걸려 있다."
+      },
+      {
+        "name": "glass-modal-scrim",
+        "value": "backdrop-filter: blur(5px)",
+        "purpose": "전면 모달 스크림. 이 아래로는 사진이 통과하지 않는다."
+      },
+      {
+        "name": "glass-background-overlay",
+        "value": "backdrop-filter: blur(3px)",
+        "purpose": "배경 오버레이. 사용자 설정(배경 블러 on/off)이 런타임에 켜고 끈다."
+      }
+    ],
+    "shadows": [
+      {
+        "name": "panel",
+        "value": "4px 0 24px rgba(0, 0, 0, 0.3)",
+        "purpose": "화면 가장자리에서 슬라이드해 들어온 사이드바. 우측 사이드바는 -4px 0 24px로 방향이 진입 방향의 반대다."
+      },
+      {
+        "name": "modal",
+        "value": "0 20px 60px rgba(0, 0, 0, 0.5)",
+        "purpose": "전면 모달 하나에만. 스크림이 이미 배경을 끊었으므로 그림자는 부피감만 준다."
+      },
+      {
+        "name": "banner",
+        "value": "0 4px 16px rgba(0, 0, 0, 0.36)",
+        "purpose": "저장소 고지·오류 배너."
+      },
+      {
+        "name": "focus-glow",
+        "value": "0 0 0 3px rgba(100, 150, 255, 0.1)",
+        "purpose": "입력 필드의 포커스 상태. 링이 아니라 번짐이며 키보드 포커스 링(outline)과는 다른 것이다. 검색 입력만 4px."
+      },
+      {
+        "name": "primary-lift",
+        "value": "0 4px 12px rgba(100, 150, 255, 0.4)",
+        "purpose": "주요 버튼의 호버. translateY(-2px)와 함께 온다. 감축 모션에서는 transform이 빠진다."
+      },
+      {
+        "name": "clock-text",
+        "value": "text-shadow: 0 2px 8px rgba(0, 0, 0, 0.5)",
+        "purpose": "시계. 표면 없는 텍스트가 읽히는 유일한 근거이며, 기록된 예외이지 따라 할 패턴이 아니다."
+      }
+    ],
+    "motion": [
+      {
+        "name": "transition-speed",
+        "value": "0.3s ease",
+        "purpose": "위치 전환, 사이드바 슬라이드, 컨트롤 상태 전환의 기본값 (--transition-speed)."
+      },
+      {
+        "name": "state-fast",
+        "value": "0.15s ease ~ 0.2s ease",
+        "purpose": "호버와 색 변화. 사용자가 흐름 안에 있으므로 기다리게 하지 않는다."
+      },
+      {
+        "name": "background-crossfade",
+        "value": "opacity 1s ease-in-out",
+        "purpose": "배경 이미지 교체. 화면에서 유일하게 긴 전환이며, 주인공인 사진에만 허용된다."
+      },
+      {
+        "name": "first-paint-gate",
+        "value": ".enable-transition (사용자 조작 시점에만 부여)",
+        "purpose": "초기 렌더에는 전환을 걸지 않는다. 첫 페인트에 전환이 걸리면 위젯이 화면을 가로질러 날아온다."
+      }
+    ],
+    "breakpoints": [
+      { "name": "lg", "value": "1024px" },
+      { "name": "md", "value": "860px" },
+      { "name": "sm", "value": "768px" }
+    ],
+    "zIndexScale": [
+      { "name": "--z-background", "value": -2, "purpose": "배경 이미지 레이어" },
+      { "name": "--z-overlay", "value": -1, "purpose": "배경 오버레이" },
+      { "name": "--z-canvas", "value": 10, "purpose": "배경 위 정보 표시 (날짜)" },
+      { "name": "--z-widget", "value": 50, "purpose": "메인 위젯, 검색창" },
+      { "name": "--z-pinned", "value": 90, "purpose": "고정 바로가기" },
+      { "name": "--z-chrome", "value": 100, "purpose": "코너 아이콘 버튼" },
+      { "name": "--z-panel", "value": 200, "purpose": "사이드바" },
+      { "name": "--z-modal", "value": 1000, "purpose": "전면 모달" }
+    ]
+  },
+  "components": [
+    {
+      "name": "Corner Icon Button",
+      "kind": "button",
+      "refersTo": "corner-icon-button",
+      "description": "화면 네 모서리에 고정된 44px 진입점. 즐겨찾기·배경 이미지·설정 셋뿐이다.",
+      "html": "<button class=\"ds-corner-btn\" aria-label=\"빠른이동\"><svg width=\"24\" height=\"24\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M3 12h18M3 6h18M3 18h18\"/></svg></button>",
+      "css": ".ds-corner-btn { width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: var(--bg-primary-glass, rgba(12,12,14,0.5)); border: 1px solid var(--border-color, rgba(255,255,255,0.08)); border-radius: 12px; color: var(--text-primary, rgba(255,255,255,0.95)); cursor: pointer; backdrop-filter: blur(10px); transition: background 0.3s, border-color 0.3s, transform 0.3s; } .ds-corner-btn:hover { background: var(--hover-bg, rgba(255,255,255,0.06)); border-color: var(--accent-color, rgba(88,128,230,0.5)); transform: scale(1.05); } .ds-corner-btn:focus-visible { outline: 2px solid var(--calendar-accent, rgba(126,160,245,0.95)); outline-offset: 2px; }"
+    },
+    {
+      "name": "Pinned Shortcut",
+      "kind": "custom",
+      "refersTo": "pinned-shortcut",
+      "description": "좌상단 세로 스택의 바로가기 한 줄. 196px 고정폭, 이름은 한 줄 말줄임.",
+      "html": "<a class=\"ds-pinned\" href=\"#\"><span class=\"ds-pinned-icon\"></span><span class=\"ds-pinned-name\">GitHub</span></a>",
+      "css": ".ds-pinned { display: flex; align-items: center; gap: 10px; width: 196px; padding: 10px 14px; background: var(--bg-secondary-glass, rgba(18,18,20,0.3)); border: 1px solid transparent; border-radius: 10px; color: var(--text-primary, rgba(255,255,255,0.95)); text-decoration: none; backdrop-filter: blur(10px) brightness(0.62); transition: background 0.3s, border-color 0.3s, transform 0.3s; } .ds-pinned-icon { width: 18px; height: 18px; flex-shrink: 0; border-radius: 4px; background: rgba(255,255,255,0.25); } .ds-pinned-name { flex: 1; font-size: 0.875rem; line-height: 1.3; letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ds-pinned:hover { background: var(--hover-bg, rgba(255,255,255,0.06)); border-color: var(--accent-color, rgba(88,128,230,0.5)); transform: translateX(4px); } .ds-pinned:focus-visible { outline: 2px solid var(--calendar-accent, rgba(126,160,245,0.95)); outline-offset: 2px; }"
+    },
+    {
+      "name": "Sidebar Item",
+      "kind": "nav",
+      "refersTo": "sidebar-item",
+      "description": "즐겨찾기 사이드바의 항목. 액션 아이콘은 호버에서만 나타나고, 드래그로 순서를 바꾼다.",
+      "html": "<a class=\"ds-sidebar-item\" href=\"#\"><span class=\"ds-sidebar-icon\"></span><span class=\"ds-sidebar-name\">Anthropic Docs</span><span class=\"ds-sidebar-actions\"><button class=\"ds-sidebar-action\" aria-label=\"삭제\"><svg width=\"14\" height=\"14\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M18 6 6 18M6 6l12 12\"/></svg></button></span></a>",
+      "css": ".ds-sidebar-item { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--bg-primary-glass, rgba(12,12,14,0.5)); border: 1px solid transparent; border-radius: 10px; color: var(--text-primary, rgba(255,255,255,0.95)); text-decoration: none; cursor: grab; transition: background 0.3s, border-color 0.3s; } .ds-sidebar-icon { width: 20px; height: 20px; flex-shrink: 0; border-radius: 4px; background: rgba(255,255,255,0.25); } .ds-sidebar-name { flex: 1; font-size: 0.875rem; line-height: 1.3; letter-spacing: 0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .ds-sidebar-actions { display: flex; gap: 4px; opacity: 0; transition: opacity 0.3s; } .ds-sidebar-item:hover .ds-sidebar-actions { opacity: 1; } .ds-sidebar-action { width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; background: transparent; border: none; border-radius: 6px; color: var(--text-secondary, rgba(255,255,255,0.65)); cursor: pointer; transition: background 0.3s, color 0.3s; } .ds-sidebar-action:hover { background: rgba(255,59,48,0.2); color: #ff3b30; } .ds-sidebar-item:hover { background: var(--hover-bg, rgba(255,255,255,0.06)); border-color: var(--accent-color, rgba(88,128,230,0.5)); } .ds-sidebar-item:focus-visible { outline: 2px solid var(--calendar-accent, rgba(126,160,245,0.95)); outline-offset: 2px; }"
+    },
+    {
+      "name": "Search Bar",
+      "kind": "input",
+      "refersTo": "search-input",
+      "description": "알약 형태의 검색 입력과 우측 원형 제출 버튼. 포커스에서 배경이 불투명해진다 — 입력 중에는 사진보다 글자가 우선한다.",
+      "html": "<form class=\"ds-search\"><input class=\"ds-search-input\" type=\"text\" placeholder=\"검색어를 입력하세요\"><button class=\"ds-search-btn\" type=\"submit\" aria-label=\"검색\"><svg width=\"20\" height=\"20\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><circle cx=\"11\" cy=\"11\" r=\"7\"/><path d=\"m20 20-3.5-3.5\"/></svg></button></form>",
+      "css": ".ds-search { position: relative; width: 100%; max-width: 500px; } .ds-search-input { width: 100%; padding: 18px 60px 18px 24px; font-size: 1rem; line-height: 1.3; letter-spacing: 0.01em; background: var(--bg-primary-glass, rgba(12,12,14,0.5)); border: 2px solid var(--border-color, rgba(255,255,255,0.08)); border-radius: 999px; color: var(--text-primary, rgba(255,255,255,0.95)); outline: none; backdrop-filter: blur(10px); transition: background 0.3s, border-color 0.3s, box-shadow 0.3s; } .ds-search-input::placeholder { color: var(--text-secondary, rgba(255,255,255,0.65)); } .ds-search-input:focus { background: var(--bg-primary, rgba(12,12,14,0.92)); border-color: var(--accent-color, rgba(88,128,230,0.5)); box-shadow: 0 0 0 4px rgba(100,150,255,0.1); } .ds-search-btn { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; background: var(--accent-color, rgba(88,128,230,0.5)); border: none; border-radius: 50%; color: #fff; cursor: pointer; transition: background 0.3s, transform 0.3s; } .ds-search-btn:hover { background: rgb(100,150,255); transform: translateY(-50%) scale(1.05); } .ds-search-btn:focus-visible { outline: 2px solid var(--calendar-accent, rgba(126,160,245,0.95)); outline-offset: 2px; }"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "모달의 확정 액션. 라벨은 동사 + 목적어.",
+      "html": "<button class=\"ds-btn-primary\">즐겨찾기 추가</button>",
+      "css": ".ds-btn-primary { padding: 12px 24px; background: var(--accent-color, rgba(88,128,230,0.5)); border: none; border-radius: 10px; color: #fff; font-size: 0.875rem; font-weight: 600; line-height: 1.3; letter-spacing: 0.01em; cursor: pointer; transition: background 0.3s, transform 0.3s, box-shadow 0.3s; } .ds-btn-primary:hover { background: rgb(100,150,255); transform: translateY(-2px); box-shadow: 0 4px 12px rgba(100,150,255,0.4); } .ds-btn-primary:focus-visible { outline: 2px solid var(--calendar-accent, rgba(126,160,245,0.95)); outline-offset: 2px; } @media (prefers-reduced-motion: reduce) { .ds-btn-primary { transition-duration: 0.01ms; } .ds-btn-primary:hover { transform: none; } }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "취소·되돌리기. 불투명 판 위의 약화 색이며, 호버에서만 본문 색으로 올라온다.",
+      "html": "<button class=\"ds-btn-secondary\">변경 취소</button>",
+      "css": ".ds-btn-secondary { padding: 12px 24px; background: var(--bg-primary, rgba(12,12,14,0.92)); border: 1px solid var(--border-color, rgba(255,255,255,0.08)); border-radius: 10px; color: var(--text-secondary, rgba(255,255,255,0.65)); font-size: 0.875rem; font-weight: 600; line-height: 1.3; letter-spacing: 0.01em; cursor: pointer; transition: background 0.3s, color 0.3s; } .ds-btn-secondary:hover { background: var(--hover-bg, rgba(255,255,255,0.06)); color: var(--text-primary, rgba(255,255,255,0.95)); } .ds-btn-secondary:focus-visible { outline: 2px solid var(--calendar-accent, rgba(126,160,245,0.95)); outline-offset: 2px; }"
+    },
+    {
+      "name": "Segment Control",
+      "kind": "chip",
+      "refersTo": "segment-option",
+      "description": "메인 위젯 종류 선택 (시계 / 달력). 둘은 공존하지 않으므로 토글이 아니라 택일이다.",
+      "html": "<div class=\"ds-segment\" role=\"group\"><button class=\"ds-segment-option is-active\" aria-pressed=\"true\">시계</button><button class=\"ds-segment-option\" aria-pressed=\"false\">달력</button></div>",
+      "css": ".ds-segment { display: inline-flex; padding: 2px; background: var(--bg-primary, rgba(12,12,14,0.92)); border: 1px solid var(--border-color, rgba(255,255,255,0.08)); border-radius: 8px; } .ds-segment-option { padding: 6px 14px; background: transparent; border: none; border-radius: 6px; color: var(--text-secondary, rgba(255,255,255,0.65)); font-size: 0.875rem; font-weight: 500; line-height: 1.3; letter-spacing: 0.01em; cursor: pointer; transition: background 0.15s ease, color 0.15s ease; } .ds-segment-option:hover { color: var(--text-primary, rgba(255,255,255,0.95)); } .ds-segment-option.is-active { background: rgba(88,128,230,0.22); color: var(--text-primary, rgba(255,255,255,0.95)); font-weight: 600; } .ds-segment-option:active { background: rgba(255,255,255,0.1); } .ds-segment-option:focus-visible { outline: 2px solid var(--calendar-accent, rgba(126,160,245,0.95)); outline-offset: 2px; }"
+    },
+    {
+      "name": "Date Pill",
+      "kind": "custom",
+      "refersTo": "date-pill",
+      "description": "우하단 고정. 고정폭 숫자라 날짜가 바뀔 때 알약이 들썩이지 않는다.",
+      "html": "<div class=\"ds-date-pill\">2026년 8월 20일 목요일</div>",
+      "css": ".ds-date-pill { display: inline-block; padding: 10px 16px; background: var(--bg-secondary-glass, rgba(18,18,20,0.3)); border: 1px solid var(--border-color, rgba(255,255,255,0.08)); border-radius: 12px; color: var(--text-primary, rgba(255,255,255,0.95)); font-size: 0.875rem; font-weight: 400; line-height: 1.3; letter-spacing: 0.01em; font-variant-numeric: tabular-nums; backdrop-filter: blur(10px) brightness(0.62); }"
+    },
+    {
+      "name": "Storage Notice",
+      "kind": "custom",
+      "refersTo": "storage-notice",
+      "description": "미리보기(localhost) 모드에서만 뜨는 하단 중앙 알약. 조용함보다 정직함이 우선하는 자리이고, 그 정직함이 차지하는 면적은 여기까지다.",
+      "html": "<p class=\"ds-storage-notice\">미리보기 모드입니다. 저장된 내용은 확장 저장소가 아니라 이 브라우저에만 남습니다.</p>",
+      "css": ".ds-storage-notice { max-width: min(92vw, 560px); padding: 6px 12px; background: var(--bg-secondary-glass, rgba(18,18,20,0.3)); border: 1px solid var(--border-color, rgba(255,255,255,0.08)); border-radius: 999px; color: rgba(255,255,255,0.86); font-size: 0.75rem; line-height: 1.5; letter-spacing: 0.01em; text-align: center; word-break: keep-all; overflow-wrap: anywhere; backdrop-filter: blur(10px) brightness(0.62); box-shadow: 0 4px 16px rgba(0,0,0,0.36); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "사진 위의 유리판",
+    "overview": "유리는 사진을 가리려고 고른 재료가 아니다. 사진을 통과시키면서 그 자리만 눌러 글자를 띄우려고 고른 재료다. 이 구분이 이 시스템의 전부다. 불투명 패널을 얹으면 글자는 읽히지만 사진이 사라지고, 표면 없이 글자만 두면 사진은 다 보이지만 밝은 사진에서 글자가 사라진다 — 실측으로 시계는 흰 배경에서 1.0:1까지 떨어진다. 반투명 + backdrop-filter만이 두 요구를 동시에 만족한다. 그래서 유리는 이 제품에서 장식이 아니라 기본 표면이다.\n\n테마는 다크 전용이고 라이트 테마는 만들지 않는다. 취향이 아니라 구조다. 배경이 사용자 사진이므로 표면은 항상 사진 위에 뜬 반투명 판이고, 그 위의 글자는 흰색이어야 어떤 사진에서도 성립한다. 검은 글자는 어두운 사진에서 즉시 무너진다.\n\n밀도는 낮다. 사용자는 이 화면을 보러 오지 않고 지나칠 뿐이며, 대부분 1초 안에 검색어를 치거나 바로가기를 누르고 떠난다. 성공은 기능 수가 아니라 사진이 몇 퍼센트 보이느냐로 측정된다. 이 시스템은 업무용 SaaS 대시보드, 알록달록한 포털 시작페이지 위젯 모음, 각지고 회색진 Windows 네이티브 앱 스타일, 그리고 불투명 카드로 사진을 액자 테두리로 전락시키는 배경화면 앱을 거부한다. 마지막 것이 가장 가까이 있는 실패다.",
+    "keyCharacteristics": [
+      "다크 전용. 표면은 근검정 유리, 글자는 흰색 한 가지.",
+      "hue 계열은 평상시 하나뿐. 상태 색은 그 상태가 실제로 발생했을 때만 등장한다.",
+      "폰트 한 가족(Pretendard Variable), 위계는 크기보다 굵기와 색이 만든다.",
+      "스크롤하지 않는 단일 화면. 반응형은 구조로 처리하고 유동 타이포를 쓰지 않는다.",
+      "모션은 상태 전달 전용. 등장 연출이 없다."
+    ],
+    "scope": "달력 위젯 제외. 달력 v2는 M1만 완료(2e6fffe)이고 M2·M3는 dogfooding 결과 대기 중이라 현재 값을 시스템으로 굳히지 않는다. 이 문서가 다루는 것은 배경 레이어, 시계, 검색창, 바로가기(고정 + 사이드바), 배경 이미지 사이드바, 설정 모달, 저장소 고지 배너, 그리고 이들이 공유하는 유리 언어다.",
+    "rules": [
+      { "name": "The 첫 페인트 Rule", "body": "초기 렌더에는 트랜지션을 걸지 않는다. .enable-transition 클래스를 사용자 조작 시점에만 부여한다. 첫 페인트에 전환이 걸리면 위젯이 화면을 가로질러 날아온다.", "section": "overview" },
+      { "name": "The 상태 전달 Rule", "body": "모션은 상태를 전달할 때만 쓴다. 새 탭은 통과하는 화면이므로 등장 연출·스크롤 시퀀스·스태거를 넣지 않는다.", "section": "overview" },
+      { "name": "The 면적 예산 Rule", "body": "새 표면의 기본값은 \"더 투명하게, 더 작게\"다. 화면에서 UI가 차지하는 면적이 늘어나는 변경은 그 자체로 후퇴이며, 무엇을 줄여 상쇄했는지가 함께 있어야 한다.", "section": "overview" },
+      { "name": "The 단일 화면 Rule", "body": "새 탭은 스크롤하지 않고 사용자는 일정한 DPI에서 본다. 반응형은 구조적으로 처리하고 clamp() 유동 타이포를 쓰지 않는다.", "section": "overview" },
+      { "name": "The 유일한 hue Rule", "body": "평상시 화면의 hue 계열은 single-hue-accent 하나다. 상태 색(위험, 경고)은 그 상태가 실제로 발생했을 때만 나타난다. 색을 장식으로 쓰지 않는다 — accent는 주요 액션, 현재 선택, 상태 표시에만 간다.", "section": "colors" },
+      { "name": "The 두 단계 Rule", "body": "유리 알파는 0.3과 0.5 두 단계뿐이다. 세 번째 단계를 만들지 않는다. 대비가 부족하면 알파가 아니라 brightness()로 해결한다.", "section": "colors" },
+      { "name": "The 표면이 정한다 Rule", "body": "대비는 텍스트 색이 아니라 그 자리의 표면이 정한다. 같은 0.65 텍스트가 스크림 위에서는 5.75:1, 단일 유리 위에서는 1.60:1이다. 대비 문제를 만나면 텍스트 알파부터 올리지 말고 어떤 표면 위인지를 먼저 본다.", "section": "colors" },
+      { "name": "The 두 예외 Rule", "body": "--text-secondary(0.65)를 본문에 쓰는 자리는 딱 둘이고 둘 다 실측 근거가 있다. 검색 플레이스홀더 — 본문 색으로 올리면 입력한 글자와 구분되지 않는다. 설정 모달 설명 문구 — 스크림 위라 0.65가 5.75:1이고, 0.95로 올리면 라벨과의 위계만 잃는다.", "section": "colors" },
+      { "name": "The 한 가족 Rule", "body": "웹폰트를 더 늘리지 않는다. 굵기가 더 필요하면 이 가변 폰트의 wght 축에서 꺼낸다. 시계에 별도 폰트를 주지 않는다.", "section": "typography" },
+      { "name": "The em 자간 Rule", "body": "디스플레이 자간은 em으로 둔다. 이전의 -4px는 144px에서 -0.028em이지만 80px에서 -0.05em이 되어 자간 하한 -0.04em을 넘어섰다.", "section": "typography" },
+      { "name": "The 고정폭 숫자 Rule", "body": "매초·매분 바뀌는 숫자에는 font-variant-numeric: tabular-nums를 건다. 비례 숫자에서는 1이 좁아서 분이 바뀔 때마다 시계 전체 폭이 달라지고, 시계는 transform으로 가운데 맞춰져 있어 그 폭 변화가 매분 좌우로 튀는 것으로 보인다.", "section": "typography" },
+      { "name": "The 12px 하한 Rule", "body": "컨트롤 안 라벨의 하한은 caption(12px)이다. 9px 한글은 읽는 글자가 아니라 무늬였다.", "section": "typography" },
+      { "name": "The 상속 한 곳 Rule", "body": "button, input, textarea, select의 font-family: inherit를 한 곳에서 건다. 폼 컨트롤은 폰트를 상속하지 않으며, 개별 규칙에 흩어 두면 새 컨트롤을 만들 때마다 빠뜨릴 자리가 생긴다.", "section": "typography" },
+      { "name": "The 한국어 줄바꿈 Rule", "body": "한국어 문장에는 word-break: keep-all을 쓴다. 어절 중간에서 꺾이면 읽기 리듬이 끊긴다. URL처럼 끊을 곳이 없는 문자열을 위해 overflow-wrap: anywhere를 함께 둔다.", "section": "typography" },
+      { "name": "The brightness Rule", "body": "본문 텍스트를 담는 유리 표면에는 brightness(0.62) 이하를 함께 건다. 알파 0.3 유리는 흰 사진 위에서 sRGB 183이고, 그 위에서는 불투명 흰색조차 2.00:1이다. 표면을 누르지 않으면 텍스트 쪽에서 할 수 있는 일이 없다.", "section": "elevation" },
+      { "name": "The 표면을 누르지 알파를 올리지 않는다 Rule", "body": "알파는 사진 전체를 균일하게 덮지만 brightness()는 밝은 부분만 눌러 같은 대비를 더 적은 사진 손실로 얻는다.", "section": "elevation" },
+      { "name": "The 유리 위 유리 금지 Rule", "body": "이미 유리인 표면 안쪽에 다시 backdrop-filter를 걸지 않는다. 블러 뒤에 사진이 아니라 유리가 있으면 비용만 내고 얻는 것이 없다. 유리를 걷어내도 대비가 그대로인 자리라면 그 유리는 순수한 장식이다.", "section": "elevation" },
+      { "name": "The 오버레이 무시 Rule", "body": "각 표면은 배경 오버레이가 없다고 가정하고 자기 대비를 스스로 확보한다. 배경 밝기 100이면 오버레이 알파가 정확히 0이 되어 사라지므로, 오버레이는 어떤 표면의 대비 근거도 될 수 없다.", "section": "elevation" }
+    ],
+    "dos": [
+      "Do 새 표면의 기본값을 \"더 투명하게, 더 작게\"로 잡는다. 면적을 늘리는 변경에는 무엇을 줄여 상쇄했는지가 함께 있어야 한다.",
+      "Do 본문 텍스트를 담는 유리에 backdrop-filter: blur(10px) brightness(0.62)를 함께 건다.",
+      "Do 유리 표면 위의 본문에 --text-primary(0.95)를 쓴다. 0.65는 아이콘·비활성 상태·큰 텍스트로 제한한다.",
+      "Do 각 표면이 배경 오버레이 없이 자기 대비를 확보하게 한다.",
+      "Do 상태를 색에만 의존해 표시하지 않는다. 색과 함께 형태나 아이콘으로도 말한다.",
+      "Do 매초·매분 바뀌는 숫자에 font-variant-numeric: tabular-nums를 건다.",
+      "Do 한국어 문장에 word-break: keep-all과 overflow-wrap: anywhere를 함께 쓴다.",
+      "Do 모든 인터랙티브 컨트롤에 outline: 2px solid var(--focus-ring) + outline-offset: 2px를 준다.",
+      "Do prefers-reduced-motion: reduce에서 셸의 전환도 함께 제거한다.",
+      "Do 사용자가 입력한 문자열을 항상 textContent로 렌더한다.",
+      "Do 아이콘을 SVG로 그리고 aria-label을 붙인다.",
+      "Do 버튼 라벨을 동사 + 목적어로 쓴다.",
+      "Do 오류 문구에 무슨 일이 일어났는지와 그 결과를 함께 적는다.",
+      "Do 설정 항목을 라벨 한 줄 + 설명 한 줄로 쓰고, 설명은 그 스위치를 켜면 화면이 어떻게 되는지를 말한다.",
+      "Do .enable-transition을 사용자 조작 시점에만 붙인다.",
+      "Do 반응형 크기 변경을 :root 토큰을 덮어서 처리한다."
+    ],
+    "donts": [
+      "Don't 사진을 배경으로 깔고 그 위에 불투명 카드를 얹지 않는다. 사진이 액자 테두리로 전락한다.",
+      "Don't 업무용 SaaS 대시보드(Notion, Asana 류)를 만들지 않는다. 통계 카드, 진행률 바, 대시보드 그리드를 쓰지 않는다.",
+      "Don't 알록달록한 위젯 모음(포털 시작페이지 류)을 만들지 않는다.",
+      "Don't Windows 기본 앱 스타일로 가지 않는다.",
+      "Don't 유리 알파에 세 번째 단계를 만들지 않는다.",
+      "Don't 대비를 얻으려고 표면 알파를 올리지 않는다. brightness()를 쓴다.",
+      "Don't 이미 유리인 표면 안쪽에 다시 backdrop-filter를 걸지 않는다.",
+      "Don't 표면 없는 텍스트를 새로 만들지 않는다. 시계는 기록된 예외다.",
+      "Don't 라이트 테마를 만들지 않는다.",
+      "Don't 웹폰트를 추가하지 않는다.",
+      "Don't 굵기 700을 쓰지 않는다.",
+      "Don't 디스플레이 자간을 px로 굳히지 않는다.",
+      "Don't 컨트롤 안 라벨을 12px 미만으로 만들지 않는다.",
+      "Don't clamp() 유동 타이포를 쓰지 않는다.",
+      "Don't 활성 상태를 좌측 강조 막대로 표시하지 않는다.",
+      "Don't 등장 연출·스크롤 시퀀스·스태거를 넣지 않는다.",
+      "Don't transition: all을 새로 쓰지 않는다.",
+      "Don't 아이콘 자리에 × 같은 문자 글리프를 쓰지 않는다.",
+      "Don't z-index를 그때그때 고르지 않는다."
+    ]
+  }
+}

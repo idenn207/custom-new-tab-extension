@@ -1,0 +1,7 @@
+{
+  "files": ["newtab.html"],
+  "exclude": ["test/**/*.html"],
+  "insertBefore": "</body>",
+  "commentSyntax": "html",
+  "cspChecked": true
+}

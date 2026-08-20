@@ -6,6 +6,34 @@
  * 책임: 단일 책임 원칙에 따라 프레젠테이션 레이어만 담당
  */
 
+/* ===== 폰트 ===== */
+/*
+ * 화면 전체를 Pretendard Variable 하나로 쓴다.
+ *
+ * 이전에는 본문이 시스템 스택(-apple-system / Segoe UI / Noto Sans KR)이고
+ * 시계만 Google Fonts의 Nanum Gothic이었다. 두 가지가 문제였다.
+ *
+ * - 새 탭이 열릴 때마다 폰트 CDN을 향한 요청이 붙었다. 확장은 오프라인에서도
+ *   열리는 화면인데 그 화면에서 가장 큰 글자가 네트워크에 매여 있었다.
+ * - 시스템 스택은 OS마다 다른 폰트로 렌더되어 자간·굵기·한글 균형을 확정할 수
+ *   없었다. 조판을 정하려면 어떤 폰트로 그려질지가 먼저 정해져야 한다.
+ *
+ * font-display를 block으로 둔 이유. swap은 폴백으로 한 번 그린 뒤 Pretendard로
+ * 바꿔 그리는데, 144px 시계에서 그 교체는 화면 절반이 출렁이는 것으로 보인다.
+ * 확장 패키지 안의 로컬 파일이라 로드가 네트워크를 타지 않으므로, 그 짧은 동안
+ * 글자를 비워 두었다가 한 번에 제 폰트로 그리는 편이 깜빡임이 적다.
+ *
+ * 가변 폰트 파일 하나가 굵기 45~920을 모두 담는다. 굵기마다 정적 파일을 받는
+ * 것보다 작고, 아래 굵기 토큰 네 단계가 전부 이 한 파일에서 나온다.
+ */
+@font-face {
+  font-family: 'Pretendard Variable';
+  src: url('fonts/PretendardVariable.woff2') format('woff2');
+  font-weight: 45 920;
+  font-style: normal;
+  font-display: block;
+}
+
 /* ===== 리셋 및 기본 설정 ===== */
 * {
   margin: 0;
@@ -31,6 +59,47 @@
   --calendar-overdue: rgba(255, 118, 110, 0.95);
   --calendar-soon: rgba(242, 190, 104, 0.95);
 
+  /* ===== 타이포그래피 ===== */
+  /*
+   * 한 가족을 굵기와 색으로만 부린다. 유리판은 좁아서 크기를 키우면 줄바꿈이
+   * 먼저 깨지므로, 위계의 대부분은 크기가 아니라 굵기와 색이 만든다.
+   */
+  --font-sans: 'Pretendard Variable', Pretendard, -apple-system, BlinkMacSystemFont,
+    'Apple SD Gothic Neo', 'Segoe UI', 'Malgun Gothic', 'Noto Sans KR', sans-serif;
+
+  /*
+   * 다섯 단계. 비율은 1.25 / 1.14 / 1.17이다. 설정 패널처럼 텍스트 역할이 많은
+   * 밀집 화면에서는 이 정도가 상한이고, 더 벌리면 패널이 소리치기 시작한다.
+   *
+   * rem을 쓰는 이유는 사용자가 브라우저 기본 글자 크기를 키웠을 때 함께 커지기
+   * 위해서다. px로 굳히면 그 설정이 이 화면에서만 무시된다.
+   */
+  --text-display: 9rem;      /* 144px — 시계 */
+  --text-title: 1.25rem;     /* 20px  — 표면 제목 */
+  --text-section: 1rem;      /* 16px  — 섹션 제목 · 검색 입력 */
+  --text-body: 0.875rem;     /* 14px  — 본문 · 라벨 · 버튼 */
+  --text-caption: 0.75rem;   /* 12px  — 보조 설명 · 컨트롤 안 라벨 */
+
+  /* 네 단계. 400과 600 사이의 500은 라벨 전용이고, 700은 쓰지 않는다 */
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-display: 800;
+
+  --leading-none: 1;
+  --leading-tight: 1.3;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.6;
+
+  /*
+   * 자간. 어두운 배경 위의 밝은 글자는 획이 번져 자간이 좁아 보인다. 작은 글자에
+   * 0.01em을 더해 그만큼 되돌린다. 큰 글자는 반대로 벌어져 보이므로 조인다.
+   * 디스플레이 자간의 하한은 -0.04em이고, -0.028em은 그 안쪽이다.
+   */
+  --tracking-ui: 0.01em;
+  --tracking-title: -0.01em;
+  --tracking-display: -0.028em;
+
   /* 간격 스케일 (4pt 기반) */
   --space-2xs: 4px;
   --space-xs: 8px;
@@ -45,12 +114,36 @@
 }
 
 body {
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans KR', sans-serif;
+  font-family: var(--font-sans);
+  /*
+   * 기본을 14px로 잡는다. 이 화면의 텍스트는 대부분 라벨이거나 컨트롤 안의 짧은
+   * 문구여서, 밀집 화면의 본문 크기가 곧 기본값이다. 길게 읽는 문장(설정 설명,
+   * 안내 문구)은 아래에서 자기 크기와 줄 높이를 따로 갖는다.
+   */
+  font-size: var(--text-body);
+  line-height: var(--leading-normal);
+  font-kerning: normal;
   color: var(--text-primary);
   overflow: hidden;
   width: 100vw;
   height: 100vh;
   position: relative;
+}
+
+/*
+ * 폼 컨트롤은 폰트를 상속하지 않는다. 이 규칙이 없으면 검색 입력, 모달 입력,
+ * 설정 좌측 탭, 모달 버튼이 브라우저 기본 폰트(대개 Arial)로 그려진다. 실제로
+ * 그랬고, 개별 규칙에 font-family: inherit가 있는 곳과 없는 곳이 섞여 있었다.
+ * 한 곳에서 한 번에 상속시키면 새 컨트롤을 만들 때 빠뜨릴 자리가 없어진다.
+ */
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+  font-size: inherit;
+  /* 대부분 한 줄짜리다. 여러 줄을 받는 textarea만 아래에서 자기 값을 갖는다 */
+  line-height: var(--leading-tight);
 }
 
 /* ===== 배경 레이어 ===== */
@@ -148,7 +241,11 @@ body {
   background: var(--bg-secondary-glass);
   border-radius: 10px;
   text-decoration: none;
-  color: var(--text-secondary);
+  /*
+   * 본문 색을 쓴다. 이 이름은 약화된 보조 정보가 아니라 이 항목의 유일한 내용이고,
+   * 0.65는 어떤 배경 밝기에서도 본문 대비를 넘기지 못한다 (DESIGN.md의 Glass 절).
+   */
+  color: var(--text-primary);
   transition: all var(--transition-speed);
   border: 1px solid transparent;
   backdrop-filter: blur(10px);
@@ -171,7 +268,9 @@ body {
 
 .pinned-bookmark-item .bookmark-name {
   flex: 1;
-  font-size: 13px;
+  font-size: var(--text-body);
+  letter-spacing: var(--tracking-ui);
+  line-height: var(--leading-tight);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -210,8 +309,10 @@ body {
 }
 
 .bookmarks-header h2 {
-  font-size: 20px;
-  font-weight: 600;
+  font-size: var(--text-title);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-title);
+  line-height: var(--leading-tight);
   color: var(--text-primary);
 }
 
@@ -250,7 +351,12 @@ body {
   background: var(--bg-primary-glass);
   border-radius: 10px;
   text-decoration: none;
-  color: var(--text-secondary);
+  /*
+   * 고정 즐겨찾기와 같은 역할이므로 같은 색을 쓴다. 흰 사진 위에서 이 표면은
+   * sRGB 97로 합성되고, 그 위의 0.65는 3.69:1로 본문 기준에 미달한다.
+   * 0.95는 5.77:1이다. 약화 색은 옆의 액션 아이콘 몫으로 남긴다.
+   */
+  color: var(--text-primary);
   transition: all var(--transition-speed);
   border: 1px solid transparent;
   position: relative;
@@ -282,7 +388,9 @@ body {
 
 .bookmark-name {
   flex: 1;
-  font-size: 14px;
+  font-size: var(--text-body);
+  letter-spacing: var(--tracking-ui);
+  line-height: var(--leading-tight);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -309,7 +417,6 @@ body {
   border-radius: 6px;
   cursor: pointer;
   transition: all var(--transition-speed);
-  font-size: 16px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -362,8 +469,10 @@ body {
 }
 
 .images-header h2 {
-  font-size: 20px;
-  font-weight: 600;
+  font-size: var(--text-title);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-title);
+  line-height: var(--leading-tight);
   color: var(--text-primary);
 }
 
@@ -407,7 +516,8 @@ body {
   flex-direction: column;
   align-items: center;
   gap: 8px;
-  color: var(--text-secondary);
+  /* 안내 문구는 본문이다. 아이콘은 아래 opacity로 따로 물러난다 */
+  color: var(--text-primary);
 }
 
 .upload-label-compact svg {
@@ -415,8 +525,9 @@ body {
 }
 
 .upload-label-compact span {
-  font-size: 14px;
-  font-weight: 500;
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-ui);
 }
 
 .images-grid-sidebar {
@@ -477,7 +588,6 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 16px;
   opacity: 0;
   transition: all var(--transition-speed);
   z-index: 10;
@@ -495,14 +605,18 @@ body {
 .empty-images {
   text-align: center;
   padding: 40px 20px;
-  color: var(--text-secondary);
+  /* 빈 상태 문구는 이 자리의 유일한 내용이므로 본문 색을 쓴다 */
+  color: var(--text-primary);
   grid-column: 1 / -1;
 }
 
 .empty-images p {
   margin: 0;
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: var(--text-body);
+  line-height: var(--leading-relaxed);
+  /* 어절 중간에서 꺾이면 읽기 리듬이 끊긴다. 끊을 곳이 없는 문자열만 예외 */
+  word-break: keep-all;
+  overflow-wrap: anywhere;
 }
 
 /* ===== 날짜 표시 (우측 하단) ===== */
@@ -510,9 +624,14 @@ body {
   position: fixed;
   bottom: 16px;
   right: 16px;
-  font-size: 14px;
-  font-weight: 400;
-  color: var(--text-secondary);
+  font-size: var(--text-body);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--tracking-ui);
+  line-height: var(--leading-tight);
+  /* 날짜는 이 표면의 유일한 내용이므로 본문 색을 쓴다 */
+  color: var(--text-primary);
+  /* 날짜가 바뀔 때 숫자 폭이 달라져 알약이 들썩이지 않게 한다 */
+  font-variant-numeric: tabular-nums;
   background: var(--bg-secondary-glass);
   backdrop-filter: blur(10px);
   padding: 10px 16px;
@@ -642,12 +761,23 @@ body {
 }
 
 .time {
-  font-family: 'Nanum Gothic', -apple-system, sans-serif;
-  font-size: 144px;
-  font-weight: 800;
-  letter-spacing: -4px;
+  /* 폰트를 따로 두지 않는다. 화면 전체가 Pretendard 하나다 */
+  font-size: var(--text-display);
+  font-weight: var(--weight-display);
+  /*
+   * em으로 두는 것이 핵심이다. -4px로 굳혀 두면 144px에서는 -0.028em이지만
+   * 768px 이하의 80px 시계에서는 -0.05em이 되어 숫자끼리 붙는다. 자간 하한
+   * -0.04em을 화면 폭이 바뀔 때마다 넘나들고 있었다.
+   */
+  letter-spacing: var(--tracking-display);
   color: var(--text-primary);
-  line-height: 1;
+  line-height: var(--leading-none);
+  /*
+   * 고정폭 숫자. 없으면 1이 다른 숫자보다 좁아서 10:11 → 10:12처럼 분이 바뀔
+   * 때마다 시계 전체 폭이 달라진다. 시계는 transform으로 가운데 맞춰져 있어
+   * 그 폭 변화가 매분 좌우로 튀는 것으로 보인다.
+   */
+  font-variant-numeric: tabular-nums;
   transition: opacity 0.3s ease;
 }
 
@@ -1244,10 +1374,11 @@ body[data-widget-type="calendar"] .calendar-widget {
 }
 
 .calendar-todo-delete {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   width: 20px;
   height: 20px;
-  font-size: 16px;
-  line-height: 1;
   opacity: 0;
 }
 
@@ -1363,9 +1494,12 @@ body[data-widget-type="calendar"] .calendar-widget {
   border: 1px solid var(--border-color);
   border-radius: 999px;
 
-  font-size: 12px;
-  line-height: 1.4;
+  font-size: var(--text-caption);
+  line-height: var(--leading-normal);
+  letter-spacing: var(--tracking-ui);
   text-align: center;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
   /* 본문 대비 기준. 밝은 배경 사진 위에서도 읽혀야 한다 (원칙 3) */
   color: rgba(255, 255, 255, 0.86);
 }
@@ -2001,7 +2135,8 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
   width: 100%;
   padding: 18px 24px;
   padding-right: 60px;
-  font-size: 16px;
+  font-size: var(--text-section);
+  letter-spacing: var(--tracking-ui);
   background: var(--bg-primary-glass);
   border: 2px solid var(--border-color);
   border-radius: 50px;
@@ -2012,6 +2147,11 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
   text-align: left;
 }
 
+/*
+ * 플레이스홀더만 --text-secondary로 남는다. 본문 색으로 올리면 입력한 글자와
+ * 구분되지 않아 검색어가 이미 적혀 있는 것처럼 보인다. 이 자리의 대비는
+ * 텍스트가 아니라 표면(brightness) 쪽에서 풀어야 한다 — DESIGN.md의 Glass 절.
+ */
 .search-input::placeholder {
   color: var(--text-secondary);
 }
@@ -2076,8 +2216,11 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
 
 .modal-content h3 {
   margin-bottom: 24px;
-  font-size: 22px;
-  font-weight: 600;
+  font-size: var(--text-title);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-title);
+  line-height: var(--leading-tight);
+  text-wrap: balance;
 }
 
 .modal-content input {
@@ -2088,7 +2231,7 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
   border: 1px solid var(--border-color);
   border-radius: 10px;
   color: var(--text-primary);
-  font-size: 14px;
+  font-size: var(--text-body);
   outline: none;
   transition: all var(--transition-speed);
 }
@@ -2114,8 +2257,8 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
   padding: 12px;
   border: none;
   border-radius: 10px;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
   cursor: pointer;
   transition: all var(--transition-speed);
 }
@@ -2153,8 +2296,10 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
 }
 
 .modal-header h2 {
-  font-size: 18px;
-  font-weight: 600;
+  font-size: var(--text-title);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-title);
+  line-height: var(--leading-tight);
   color: var(--text-primary);
   margin: 0;
 }
@@ -2218,13 +2363,13 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
   border: none;
   color: var(--text-secondary);
   text-align: left;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
   cursor: pointer;
   border-radius: 6px;
   transition: all 0.2s ease;
   position: relative;
-  letter-spacing: 0.2px;
+  letter-spacing: var(--tracking-ui);
 }
 
 .settings-menu-item::before {
@@ -2292,11 +2437,11 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
 }
 
 .settings-section-title {
-  font-size: 16px;
-  font-weight: 600;
+  font-size: var(--text-section);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
   color: var(--text-primary);
   margin: 0 0 8px 0;
-  letter-spacing: 0.3px;
 }
 
 .settings-divider {
@@ -2313,16 +2458,25 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
 }
 
 .settings-item-label {
-  font-size: 15px;
-  font-weight: 500;
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-tight);
   color: var(--text-primary);
   flex: 1;
 }
 
+/*
+ * 라벨 한 줄 아래의 설명. 여기만 본문보다 작다 — 라벨(14px/500)과 크기·굵기가
+ * 같으면 둘 중 무엇이 조작 대상인지 한눈에 갈리지 않는다. 대신 줄 높이를 넓혀
+ * 12px에서도 두세 줄이 편히 읽히게 한다.
+ */
 .settings-item-description {
-  font-size: 13px;
+  font-size: var(--text-caption);
   color: var(--text-secondary);
-  line-height: 1.5;
+  line-height: var(--leading-relaxed);
+  letter-spacing: var(--tracking-ui);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
   margin: -8px 0 8px 0;
 }
 
@@ -2335,9 +2489,14 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
   display: none;
 }
 
+/*
+ * 트랙이 68px인 이유는 안의 글자다. 라벨이 9px일 때는 56px에 들어갔지만 그
+ * 크기의 한글("랜덤" / "고정")은 읽는 글자가 아니라 무늬였다. 12px로 올리면서
+ * 엄지(18px)와 부딪히지 않을 만큼만 넓혔다.
+ */
 .toggle-label-small {
   display: block;
-  width: 56px;
+  width: 68px;
   height: 26px;
   background: var(--bg-primary);
   border: 1.5px solid var(--border-color);
@@ -2366,7 +2525,8 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
 }
 
 .toggle-input-small:checked + .toggle-label-small::before {
-  left: 31px;
+  /* 68 - 18(엄지) - 3(오른쪽 여백) */
+  left: 47px;
   background: white;
 }
 
@@ -2377,12 +2537,13 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 9px;
-  font-weight: 600;
-  color: var(--text-secondary);
+  font-size: var(--text-caption);
+  font-weight: var(--weight-semibold);
+  color: var(--text-primary);
   transition: all 0.25s ease;
   text-transform: uppercase;
-  letter-spacing: 0.3px;
+  /* 대문자는 기본 자간에서 서로 붙는다. ON/OFF에 필요한 만큼만 벌린다 */
+  letter-spacing: 0.05em;
 }
 
 .toggle-input-small:not(:checked) + .toggle-label-small .toggle-text-small::before {
@@ -2403,8 +2564,8 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
   flex-shrink: 0;
   min-width: 48px;
   text-align: right;
-  font-size: 14px;
-  font-weight: 600;
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
   color: var(--accent-color);
   font-variant-numeric: tabular-nums;
 }
@@ -2521,8 +2682,8 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 11px;
-  font-weight: 600;
+  font-size: var(--text-caption);
+  font-weight: var(--weight-semibold);
   color: var(--text-secondary);
   transition: all var(--transition-speed);
 }
@@ -2610,9 +2771,8 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
   border: none;
   border-radius: 6px;
   color: var(--text-secondary);
-  font-family: inherit;
-  font-size: 13px;
-  font-weight: 500;
+  font-size: var(--text-body);
+  font-weight: var(--weight-medium);
   cursor: pointer;
   transition: background 0.15s ease, color 0.15s ease;
 }
@@ -2651,9 +2811,8 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
   border: 1px solid var(--border-color);
   border-radius: 8px;
   color: var(--text-primary);
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 500;
+  font-size: var(--text-caption);
+  font-weight: var(--weight-medium);
   cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
 }
@@ -2674,8 +2833,11 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
 
 .settings-status {
   margin-top: var(--space-xs);
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: var(--text-caption);
+  line-height: var(--leading-relaxed);
+  letter-spacing: var(--tracking-ui);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
   color: var(--text-secondary);
 }
 
@@ -2685,8 +2847,9 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
 
 /* ===== 반응형 디자인 ===== */
 @media (max-width: 1024px) {
-  .time {
-    font-size: 108px;
+  /* 토큰만 덮는다. .time 규칙은 파일에 하나뿐이고 크기는 여기서만 바뀐다 */
+  :root {
+    --text-display: 6.75rem; /* 108px */
   }
 
   /* 코너 토글은 이 폭에서도 24px/44px 그대로다 — 자리 비움을 줄이지 않는다 */
@@ -2752,8 +2915,8 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
     padding: 0 20px;
   }
 
-  .time {
-    font-size: 80px;
+  :root {
+    --text-display: 5rem; /* 80px */
   }
 
   /* 모바일에서 시계 위/아래 위치 조정 */
@@ -2784,13 +2947,13 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
 
   .search-input {
     padding: 14px 20px;
-    font-size: 14px;
+    font-size: var(--text-body);
   }
 
   .date-display {
     bottom: 12px;
     right: 12px;
-    font-size: 12px;
+    font-size: var(--text-caption);
     padding: 8px 14px;
   }
 
