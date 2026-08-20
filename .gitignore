@@ -6,6 +6,10 @@
 .claude/notes/
 .claude/worktrees/
 
+# 작업용 git worktree의 기본 위치. 저장소 안에 있지만 각자의 체크아웃이므로
+# 추적하지 않는다 (`git worktree add .worktrees/<브랜치명>`).
+.worktrees/
+
 # Playwright MCP가 남기는 스냅샷·콘솔 로그·스크린샷. 재생성 가능하다.
 .playwright-mcp/
 /banner-overlay.png
