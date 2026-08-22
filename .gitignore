@@ -83,3 +83,10 @@
 .gitignore.bak
 .gitignore.*.tmp
 # <<< mccp runtime artifacts — managed by /mccp:setup <<<
+
+# work-calendar M1 게이트의 작업 중 산물 (플랜 Files to Change / Task 0).
+# 셋 다 게이트 사이에만 존재하고 gate-final 이 함께 지운다. 관리 블록 **밖**에
+# 두는 것이 계약이다 — /mccp:setup 이 블록을 다시 쓸 때 지워지면 안 된다.
+.claude/plans/.m1-baseline.sha256
+.claude/plans/.m1-criteria.sha256
+.claude/plans/.m1-gates.log
