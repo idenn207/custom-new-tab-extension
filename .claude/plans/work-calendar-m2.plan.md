@@ -315,7 +315,7 @@ MEDIUM 으로, test 는 CRITICAL 둘에서 0 으로 내려갔다. 그런데 **in
 앞으로 옮겼다: `[기계]` · `[사람]` · `[기계+사람]`. 열일곱 중 열하나가 `[사람]` 이라는
 사실이 이제 목록을 훑기만 해도 보인다.
 
-**이것으로 강제되지 않는 스물하나가 강제되지는 않는다.** 바뀐 것은 그 스물하나가 강제되지
+**이것으로 강제되지 않는 스물셋이 강제되지는 않는다.** 바뀐 것은 그 스물셋이 강제되지
 않는다는 사실을 **숨기기 어려워졌다**는 것뿐이고, 그것이 이 저장소에서 가능한 전부다
 (DD23). R7 invariant 가 낸 열 건 중 다섯(F1·F2·F4·F6·F8)이 "플랜이 강제 불가를 스스로
 적어 놓고 체크박스로 올렸다"의 변주였는데, 그중 실제로 고칠 수 있는 잔여는 이 배치
@@ -392,7 +392,9 @@ M3의 몫이다(DD31의 경계는 Summary에 한 문장으로 적었다).
   2. `work-calendar-m2.baseline.json` — 위 버튼으로 내려받아 저장소 루트에 둔다
   3. `.claude/plans/work-calendar-m2.baseline.sha256` — `shasum -a 256 test/positioning.smoke.js work-calendar-m2.baseline.json > .claude/plans/work-calendar-m2.baseline.sha256`
 
-  **고치는 것**: 없다. 하네스에 버튼을 더할 뿐 케이스는 건드리지 않는다.
+  **고치는 것**: `test/positioning.smoke.js` — **버튼 마크업은 `.html`에 가지만 리스너는 여기 붙는다**(santa R3 B1). 확장 오리진 페이지라 인라인 스크립트가 CSP에 막히고, 기존 버튼들도 전부 이 파일에서 `document.getElementById('runBaseline')?.addEventListener(...)` 형태로 붙는다(`test/positioning.smoke.js:1119` 부근). 앞선 판은 "만드는 것"에 `.html` 하나만 적고 "고치는 것: 없다"라고 했는데, **그대로 따르면 버튼은 생기고 리스너가 없어 눌러도 아무 파일도 안 받아진다.** 그러면 Task 0이 `work-calendar-m2.baseline.json`을 만들지 못하고, 그것을 요구하는 Task 7과 Validation 3의 앵커 사슬이 시작조차 못 한다.
+
+  **케이스는 건드리지 않는다** — 이 Task가 `.js`에서 더하는 것은 리스너 하나뿐이고, `runAll()`의 케이스 목록과 실행 순서는 그대로다. 그리고 **해시는 이 변경 뒤에 뜬다**(아래 3번). 리스너를 더하기 전 파일로 해시를 뜨면 첫 `shasum -c`부터 깨진다.
 
   > **이 셋은 지금 저장소에 없다. 그것이 이 Task의 존재 이유다.** R6 invariant F1이 "`베이스라인 내보내기` 버튼이 `test/positioning.smoke.html`에 없다"를 HIGH로 냈고, M1도 같은 오독을 두 번 받았다(백로그 `id=9i-bootstrap`). 플랜 검토 시점에 Task 0의 산출물이 없는 것은 결함이 아니라 **Task 0이 아직 수행되지 않았다는 사실**이다. Validation 절이 두 시점으로 갈린 이유가 정확히 이것이며, 앵커 검사(3번)는 이 Task 뒤에만 돈다.
 
@@ -418,11 +420,11 @@ M3의 몫이다(DD31의 경계는 Summary에 한 문장으로 적었다).
   **이 Task가 고치는 것 — 하나다.**
   - `createCalendarEvent()`(`newtab.js:304`) — `gates`와 `projectId`를 화이트리스트에 더하고, **함수의 마지막 줄에서 `deriveEventRange(event)`를 부른 뒤 그 반환값을 돌려준다.** 이것이 DD26이 세는 **첫째 호출 자리**이며, 선택이 아니라 이 Task의 완료 조건이다
 
-  세부 계약은 아래에 잇는다. `CalendarGate` typedef를 새로 만든다 — `{ id, kind, planned, actual, status }`. `kind`는 `null` 또는 `GATE_KINDS`(`dev`·`review`·`stg`·`prod`·`monitor`, DD12의 코드 상수) 중 하나이고, `planned`는 `makeDateKey()`로만 생성한 `'YYYY-MM-DD'`, `actual`은 같은 형식 또는 `null`, `status`는 `pending`·`done`·`dropped`(DD5). `CalendarProject`는 `{ id, name, createdAt, updatedAt }`이고 **자체 생성 게이트 `createCalendarProject()`를 갖는다**(DD20) — `createCalendarEvent()`와 같은 화이트리스트 대입, `MAX_PROJECT_NAME_CHARS` 절단, `id` 부재 시 `crypto.randomUUID()`, 필수값 부재 시 `null` 반환. 상수 `MAX_PROJECTS`도 함께 둔다. 이벤트에만 게이트가 있고 프로젝트에는 없으면 백업 파일이 **유일하게 검사받지 않는 입력 통로**가 된다(R1 security F4). `CalendarEvent`에 `gates`(비어 있지 않은 배열)와 `projectId`(문자열 또는 `null`)를 더하고, `startDate`·`endDate`·`date`는 **관문에서 파생되는 잔존 필드로 재정의**하고, 재계산은 `deriveEventRange(event)` 하나가 맡는다(DD4·DD26) — `createCalendarEvent()`의 **마지막**에서 부르므로 생성·적재·정제가 그 지점을 지난다. **마이그레이션은 지나지 않는다** — `promoteEventsToV4()`는 DD19의 순수 함수라 `createCalendarEvent()`를 거치지 않으므로 자기가 직접 부른다(DD26의 셋째 호출 자리, R3 architect CRITICAL). `createCalendarEvent()`를 확장하되 화이트리스트 대입 방식을 그대로 지킨다 — `gates`는 항목마다 **`createCalendarGate(input)`을 통과시킨다 — 이 함수도 이 Task가 만든다**(R4 security F1 · test F3에서 "쓰인다고만 적히고 만들라고는 적히지 않았다"로 지목됐다). `createCalendarEvent()`와 같은 형태다: 화이트리스트 대입(prototype pollution 차단) · `planned`는 `makeDateKey()` 왕복 검증을 통과한 `'YYYY-MM-DD'`만 · `kind`는 `null` 또는 `GATE_KINDS` 화이트리스트 · `status`는 `pending`/`done`/`dropped` 화이트리스트 · `actual`은 같은 날짜 형식 또는 `null` · `id` 부재 시 `crypto.randomUUID()` · 필수값이 없거나 형식이 틀리면 **`null` 반환**(호출부가 걸러낸다). 통과한 것이 하나도 없으면 관문 하나를 만들어 세운다(빈 관문 집합은 존재할 수 없다). **어느 날짜에서 만드는지를 못박는다**(R9 architect F1 — "`endDate`/`date`에서"는 둘 중 무엇이 이기는지를 정하지 않았고, `startDate`에서 만들면 DD3의 종단 관문이 `endDate`와 달라져 마감 의미가 바뀐다): **종단** 관문은 `planned := endDate ?? date`에서 만들고 `startDate`에서 만들지 않는다. 둘 다 없으면 이벤트 자체가 무효이므로 `createCalendarEvent()`가 `null`을 돌려준다(기존 필수값 규약).
+  세부 계약은 아래에 잇는다. `CalendarGate` typedef를 새로 만든다 — `{ id, kind, planned, actual, status }`. `kind`는 `null` 또는 `GATE_KINDS`(`dev`·`review`·`stg`·`prod`·`monitor`, DD12의 코드 상수) 중 하나이고, `planned`는 `makeDateKey()`로만 생성한 `'YYYY-MM-DD'`, `actual`은 같은 형식 또는 `null`, `status`는 `pending`·`done`·`dropped`(DD5). `CalendarProject`는 `{ id, name, createdAt, updatedAt }`이고 **자체 생성 게이트 `createCalendarProject()`를 갖는다**(DD20) — `createCalendarEvent()`와 같은 화이트리스트 대입, `MAX_PROJECT_NAME_CHARS` 절단, `id` 부재 시 `crypto.randomUUID()`, 필수값 부재 시 `null` 반환. 상수 `MAX_PROJECTS`도 함께 둔다. 이벤트에만 게이트가 있고 프로젝트에는 없으면 백업 파일이 **유일하게 검사받지 않는 입력 통로**가 된다(R1 security F4). `CalendarEvent`에 `gates`(비어 있지 않은 배열)와 `projectId`(문자열 또는 `null`)를 더하고, `startDate`·`endDate`·`date`는 **관문에서 파생되는 잔존 필드로 재정의**하고, 재계산은 `deriveEventRange(event)` 하나가 맡는다(DD4·DD26) — `createCalendarEvent()`의 **마지막**에서 부르므로 생성·적재·정제가 그 지점을 지난다. **마이그레이션은 지나지 않는다** — `promoteEventsToV4()`는 DD19의 순수 함수라 `createCalendarEvent()`를 거치지 않으므로 자기가 직접 부른다(DD26의 셋째 호출 자리, R3 architect CRITICAL). `createCalendarEvent()`를 확장하되 화이트리스트 대입 방식을 그대로 지킨다 — `gates`는 항목마다 **`createCalendarGate(input)`을 통과시킨다 — 이 함수도 이 Task가 만든다**(R4 security F1 · test F3에서 "쓰인다고만 적히고 만들라고는 적히지 않았다"로 지목됐다). `createCalendarEvent()`와 같은 형태다: 화이트리스트 대입(prototype pollution 차단) · `planned`는 `makeDateKey()` 왕복 검증을 통과한 `'YYYY-MM-DD'`만 · `kind`는 `null` 또는 `GATE_KINDS` 화이트리스트 · `status`는 `pending`/`done`/`dropped` 화이트리스트 · `actual`은 같은 날짜 형식 또는 `null` · `id` 부재 시 `crypto.randomUUID()` · 필수값이 없거나 형식이 틀리면 **`null` 반환**(호출부가 걸러낸다). **입력에 살아남은 관문이 하나도 없으면 레거시 범위 필드에서 다시 만든다**(빈 관문 집합은 존재할 수 없다). 조건은 "`gates`가 **없다**"가 아니라 "**유효한 관문이 하나도 남지 않았다**"이며, `gates`가 아예 없는 경우와 `gates`가 있었지만 전부 검증에서 떨어진 경우를 **같게** 다룬다(santa R3 B4 — 앞선 판은 두 문장이 서로 다른 조건을 걸어, 같은 입력에 두 구현이 나올 수 있었다). 떨어진 관문이 있었다면 **몇 개가 떨어졌는지 콘솔에 고지한다** — 손상된 관문 정보가 조용히 범위 필드로 대체되는 것은 사용자가 알아야 하는 변화다. 레거시 범위 필드마저 없으면 이벤트가 무효이므로 `null`을 돌려준다. **어느 날짜에서 만드는지를 못박는다**(R9 architect F1 — "`endDate`/`date`에서"는 둘 중 무엇이 이기는지를 정하지 않았고, `startDate`에서 만들면 DD3의 종단 관문이 `endDate`와 달라져 마감 의미가 바뀐다): **종단** 관문은 `planned := endDate ?? date`에서 만들고 `startDate`에서 만들지 않는다. 둘 다 없으면 이벤트 자체가 무효이므로 `createCalendarEvent()`가 `null`을 돌려준다(기존 필수값 규약).
 
 **그런데 종단 관문 **하나만** 만들면 가져오기가 데이터를 지운다**(santa R2 B2, CRITICAL). R9는 "종단 관문을 **어느 날짜**에서 만드는가"에 답한 것이지 "관문을 **몇 개** 만드는가"에 답한 것이 아니었는데, 앞선 판은 뒤 질문까지 답한 것처럼 `startDate`를 통째로 버렸다. 그러면 승격 경로와 가져오기 경로가 **같은 입력에 다른 답**을 낸다 — `promoteEventsToV4()`는 `uniqueDates([startDate, endDate])`로 관문 **둘**을 세우는데(DD1), 사용자가 v4 이전에 내보낸 v3 JSON을 나중에 가져오면 그것은 `handleCalendarImport()` → `replaceEvents()` → `sanitizeImportedEvents()` → `createCalendarEvent()`를 타고(그리고 Task 3이 `handleCalendarImport()`를 **고치지 않기로** 했으므로 그 경로가 유일하다) 관문 **하나**만 얻는다. 5일짜리 일정이 하루로 접히고, `deriveEventRange()`가 `startDate := min(planned) = endDate`로 다시 파생하므로 **원래 시작일이 복구 불가능하게 사라진다.** DD31 이후에는 점유까지 하루로 줄어 화면에서도 사라진다. 오류는 나지 않는다.
 
-**규칙을 하나로 적는다 — `gates`가 없고 레거시 범위 필드가 있으면 승격과 같은 방식으로 만든다**: `uniqueDates([startDate, endDate ?? date])`. 종단 관문의 출처는 R9가 정한 그대로 `endDate ?? date`이고(그 답은 옳고 여기서 뒤집지 않는다), `startDate`가 다르면 시작 관문이 하나 더 선다. `startDate`가 없거나 같으면 `uniqueDates`가 하나로 접으므로 단일 날짜 이벤트는 지금과 같다. **가져오기와 마이그레이션이 같은 입력에 같은 답을 내는 것이 이 규칙의 전부이고**, 그것이 DD1이 "범위 선택 UI로 의도해서 넣은 정보를 지우지 않는다"고 적은 판단을 가져오기 경로에도 적용한 것이다. 관문 개수 상한 `MAX_GATES_PER_EVENT`를 두고 초과분은 절단한다. **같은 날짜의 관문 둘은 허용한다**(DD25) — `uniqueDates`는 마이그레이션 규칙이지 입력 규칙이 아니며, 같은 날 `dev`와 `review`가 서는 것이 이 마일스톤이 담으려는 업무 모양이다(R2 architect F5). 단 `kind`가 **둘 다 `null`인** 같은 날짜 관문은 구별할 수단이 없으므로 만들지 않는다.
+**규칙을 하나로 적는다 — 위의 재구성 조건("유효한 관문이 하나도 남지 않았다")이 걸리고 레거시 범위 필드가 있으면, 승격과 같은 방식으로 만든다**: `uniqueDates([startDate, endDate ?? date])`. **조건은 위 문장과 같은 것이고 여기서 다시 좁히지 않는다**(santa R3 B4). 종단 관문의 출처는 R9가 정한 그대로 `endDate ?? date`이고(그 답은 옳고 여기서 뒤집지 않는다), `startDate`가 다르면 시작 관문이 하나 더 선다. `startDate`가 없거나 같으면 `uniqueDates`가 하나로 접으므로 단일 날짜 이벤트는 지금과 같다. **가져오기와 마이그레이션이 같은 입력에 같은 답을 내는 것이 이 규칙의 전부이고**, 그것이 DD1이 "범위 선택 UI로 의도해서 넣은 정보를 지우지 않는다"고 적은 판단을 가져오기 경로에도 적용한 것이다. 관문 개수 상한 `MAX_GATES_PER_EVENT`를 두고 초과분은 절단한다. **같은 날짜의 관문 둘은 허용한다**(DD25) — `uniqueDates`는 마이그레이션 규칙이지 입력 규칙이 아니며, 같은 날 `dev`와 `review`가 서는 것이 이 마일스톤이 담으려는 업무 모양이다(R2 architect F5). 단 `kind`가 **둘 다 `null`인** 같은 날짜 관문은 구별할 수단이 없으므로 만들지 않는다.
 **막는 자리는 편집기가 아니라 `createCalendarEvent()` 다**(R7 architect F1) — 편집기만 막으면
 가져오기가 그 규칙을 우회하고, 이 마일스톤에서 남의 파일이 `gates` 를 들고 들어오는
 경로가 실제로 있다(DD28). `gates` 배열을 조립할 때 **`kind === null` 인 항목끼리만**
@@ -657,10 +659,21 @@ M3의 몫이다(DD31의 경계는 Summary에 한 문장으로 적었다).
 
 ### Task 7: 하네스 확충과 재베이스라인
 - **Action**: Task 2~6이 만든 케이스 **다섯**을 `runAll()` 순서에 넣는다. **무엇을 잇는지 세어 적는다**(R8 test F4 — "Task 2~6에서 더한 케이스"라고만 적으면 Task 3·4·6이 무엇을 더했는지가 다시 판단의 문제가 된다): 기존 `runCalendarV3MigrationCases` 바로 뒤에 `runCalendarV4MigrationCases`, 그 뒤에 `runCalendarV4EquivalenceCases`(등가 판정은 마이그레이션이 검증된 다음에만 의미가 있다), 이어서 `runCalendarProjectCases` · `runCalendarGateCases` · `runCalendarOnboardingCases`. **시계 경로 diff 0을 먼저 확인한 뒤** 달력 경로를 의도된 변경으로 재베이스라인한다. 단언 실패가 0건인지 마지막에 다시 본다.
-  **재베이스라인 직후 뒤쪽 앵커를 뜬다**(santa R2 B3) — `shasum -a 256 test/positioning.smoke.js work-calendar-m2.baseline.json > .claude/plans/work-calendar-m2.rebaseline.sha256`. Task 0의 `baseline.sha256`은 **구현 전 기록이라 여기서 갱신하지 않고 그대로 둔다**; 둘의 차이가 이 마일스톤이 하네스와 베이스라인을 어떻게 움직였는지의 감사 기록이다. 끝 상태 게이트(Validation 3)가 읽는 것은 뒤쪽이다.
+  **재베이스라인 직후, `베이스라인 내보내기`를 다시 눌러 파일을 새로 받은 뒤** 뒤쪽 앵커를 뜬다(santa R2 B3 · **santa R3 B3이 그 답의 구멍을 잡았다**) — `shasum -a 256 test/positioning.smoke.js work-calendar-m2.baseline.json > .claude/plans/work-calendar-m2.rebaseline.sha256`.
+
+  **재내보내기가 빠지면 앵커가 아무것도 묶지 못한다.** 재베이스라인은 하네스를 다시 돌려 새 스냅샷을 `chrome.storage.local`의 `__smokeBaseline`에 넣는 동작이고(`test/positioning.smoke.js:1122` 부근), 저장소 루트의 `work-calendar-m2.baseline.json`은 **Task 0이 한 번 내려받아 둔 파일일 뿐 그것과 연결돼 있지 않다.** 재내보내기 없이 해시를 뜨면 "Task 0의 옛 파일이 그동안 안 바뀌었다"만 증명하고, 정작 **비교에 실제로 쓰이는 베이스라인과 커밋된 파일이 같은가**는 증명하지 않는다. 순서를 못박는다 — (1) 재베이스라인, (2) `베이스라인 내보내기` 재클릭 후 받은 파일로 `work-calendar-m2.baseline.json` 덮어쓰기, (3) 그 파일과 하네스로 `rebaseline.sha256` 생성. Task 0의 `baseline.sha256`은 **구현 전 기록이라 여기서 갱신하지 않고 그대로 둔다**; 둘의 차이가 이 마일스톤이 하네스와 베이스라인을 어떻게 움직였는지의 감사 기록이다. 끝 상태 게이트(Validation 3)가 읽는 것은 뒤쪽이다.
 - **Mirror**: `test/positioning.smoke.js:975` `runAll()`의 실행 순서와 저장소 복원 규약
 - **Validate**: 단언 실패 0건(`runCalendarV4EquivalenceCases`의 등가 단언 포함). 시계 경로 diff 0.
-  - **"설명되는 diff"를 열거로 못박는다**(R0 invariant F4 — 정의가 없으면 거의 모든 diff를 정당화할 수 있다). 허용되는 diff는 **셋뿐**이다: (a) 새 케이스가 추가한 **새 키**(`v4-equivalence/*` · `migration-v4/*` · `project/*` · `gate/*` · `onboarding/*`), (b) 기존 달력 케이스의 도메인 투영에 **새 필드가 늘어난 것**(`gates` · `projectId`), (c) `migration-v3/01-promote`의 `fields` 문자열처럼 **필드 목록을 문자열로 담은 값이 그 두 필드만큼 길어진 것**.
+  - **"설명되는 diff"를 열거로 못박는다**(R0 invariant F4 — 정의가 없으면 거의 모든 diff를 정당화할 수 있다). 허용되는 diff는 **넷뿐**이다: (a) 새 케이스가 추가한 **새 키**(`v4-equivalence/*` · `migration-v4/*` · `project/*` · `gate/*` · `onboarding/*`), (b) 기존 달력 케이스의 도메인 투영에 **새 필드가 늘어난 것**(`gates` · `projectId`), (c) `migration-v3/01-promote`의 `fields` 문자열처럼 **필드 목록을 문자열로 담은 값이 그 두 필드만큼 길어진 것**, (d) **DD31이 요구하는 점유 축소 — 아래에 케이스 이름과 기대값까지 열거한다.**
+
+    **(d)를 열거로 적는 이유**(santa R3 B2). 앞선 판은 (a)~(c) 셋만 허용하고 "기존 키의 기존 필드 **값**이 바뀌는 것"을 명시적으로 금지했는데, **DD31을 옳게 구현하면 정확히 그 금지된 변화가 난다.** 플랜이 자기 구현을 자기 검증으로 떨어뜨리고 있었다. 그렇다고 "값 변화 허용"이라고 넓히면 (a)~(c)를 열거로 못박은 R0 invariant F4의 취지가 통째로 사라지므로, **바뀌는 케이스와 바뀐 뒤의 값을 이름으로 적는다.**
+
+    - `range/01-month-boundary`(`test/positioning.smoke.js:568-589`) — 입력이 `{ startDate: '2026-01-28', endDate: '2026-02-03' }` 한 건이므로 관문은 그 **양 끝 둘**이 되고 사이 나흘은 점유에서 빠진다.
+      - `januaryChipDates`: `['2026-01-28','2026-01-29','2026-01-30','2026-01-31']` → **`['2026-01-28']`**
+      - `februaryChipDates`: `['2026-02-01','2026-02-02','2026-02-03']` → **`['2026-02-03']`**
+      - `distinctDates`(둘의 합집합을 정렬한 **배열**이지 개수가 아니다 — `test/positioning.smoke.js`의 `Array.from(new Set(january.concat(february))).sort()`): `['2026-01-28','2026-01-29','2026-01-30','2026-01-31','2026-02-01','2026-02-02','2026-02-03']` → **`['2026-01-28','2026-02-03']`**
+    - 위 셋 **말고** 기존 키의 기존 필드 값이 바뀌면 그것은 (d)가 아니다. **DD31의 파급이 여기서 끝난다는 것이 이 열거의 주장이고**, 다른 케이스에서 값이 움직였다면 점유 말고 다른 것이 함께 바뀐 것이므로 재베이스라인하지 말고 원인을 찾는다.
+    - 이 세 값은 **재베이스라인 전에 사람이 먼저 눈으로 맞춰 본다.** 재베이스라인은 diff를 지우는 동작이므로, 맞는지 보지 않고 누르면 (d)가 "모든 값 변화 허용"과 같아진다.
   - **허용되지 않는 것도 명시한다.** 기존 키의 **기하**(`snapshot()`이 담는 `rect`·`display`·`classes`·`intersects`)는 달력 경로에서도 **전부 diff 0이어야 한다** — UI4가 새 시각 언어를 금지했으므로 M2에서 사각형이 움직일 이유가 없다. 기존 키의 **기존 필드 값이 바뀐 것**(예: `donePreserved` · `promotedRanges` · `dueText`)도 허용되지 않는다. 이 둘 중 하나라도 나오면 **재베이스라인하지 않고 원인을 찾는다**
 
 ### Task 8: PRD 갱신과 하루 재현 테스트
@@ -874,6 +887,9 @@ M3이 관문·부하 표시의 시각 언어를 결정할 때 위 순서를 따�
 - [ ] `[사람]` **성공한 프로젝트 변경이 그 렌더에 보인다** — `spyOn`으로 `render`를 감싸고, `persistProjects(next)` 성공 시 **render가 불린 시점에 이미 `this.projects === next`**인지 단언한다. 대입이 `persistEvents()` 밖에 있으면 render가 옛 목록으로 돌아 이 단언이 죽는다 (DD27b, santa R1 B1)
 - [ ] `[사람]` **항목 하나가 손상돼도 봉인된다** — `calendarProjects`를 배열로 두되 한 항목만 망가뜨린 뒤, `projectsLoadFailed`가 참이 되고 `persistProjects()`가 `false`를 돌려주며 **그 프로젝트를 가리키던 이벤트의 `projectId`가 살아 있는지** 단언한다 (DD27a, santa R1 B2)
 - [ ] `[사람]` **`id`를 잃은 행은 되살아나지 않는다** — `calendarProjects`의 한 행에서 `id`만 지운 뒤, `projectsLoadFailed`가 참이 되고 그 프로젝트를 가리키던 이벤트의 `projectId`가 **살아 있는지** 단언한다. 생성 게이트에 맡기면 새 UUID가 붙어 통과하므로 이 단언이 죽는다 (DD27a, santa R2 B1)
+- [ ] `[사람]` **`베이스라인 내보내기` 버튼이 실제로 파일을 받아 낸다** — 브라우저에서 눌러 `work-calendar-m2.baseline.json`이 실제로 내려오는지 확인한다. 리스너가 `test/positioning.smoke.js`에 붙지 않으면 버튼만 생기고 아무 일도 안 일어나며, 그러면 앵커 사슬이 시작되지 않는다 (Task 0, santa R3 B1)
+- [ ] `[기계+사람]` **재베이스라인 뒤 커밋된 베이스라인 파일이 실제 비교 기준과 같다** — Task 7이 재베이스라인 → `베이스라인 내보내기` 재클릭 → 파일 덮어쓰기 → `rebaseline.sha256` 생성 **순서로** 했고(사람), `shasum -c`가 통과한다(기계). 재내보내기를 빠뜨리면 옛 파일이 안 바뀐 것만 증명된다 (santa R3 B3)
+- [ ] `[사람]` **DD31의 점유 축소가 열거한 세 값에서만 난다** — 재베이스라인 **전에** `range/01-month-boundary`의 `januaryChipDates`·`februaryChipDates`·`distinctDates`가 Task 7이 적어 둔 기대값과 같은지 눈으로 맞춘다. 다른 기존 케이스에서 값이 움직였으면 재베이스라인하지 않고 원인을 찾는다 (santa R3 B2)
 - [ ] `[사람]` **가져오기와 마이그레이션이 같은 입력에 같은 답을 낸다** — 폭 있는 v3 이벤트 하나(`startDate = today-3`·`endDate = today`)를 (a) 마이그레이션으로 승격시킨 결과와 (b) 같은 JSON을 `replaceEvents()`로 가져온 결과의 `gates.map(g => g.planned).sort()`가 **일치하는지** 단언한다. 종단 관문만 만들면 (b)가 하나로 접혀 죽는다 (DD1, santa R2 B2)
 - [ ] `[사람]` **프로젝트 읽기 실패가 화면에 고지된다** — `applyStorageNotice({ projectsLoadFailed: true })`가 `storageNotice`에 프로젝트 문구를 낸다. 늘어난 서명을 안 쓰면 아무 문구도 안 나와 죽는다 (DD27c, santa R1 B3)
 - [ ] `[사람]` **그리드와 패널이 같은 날짜에 같은 답을 낸다** — `today-3`·`today` 관문 이벤트에서 `today-1` 셀이 비어 있고 **그 날짜의 `getEventsForDate()`도 빈 배열인지** 단언한다. 둘 중 하나만 고치면 여기서 죽는다 (DD31, santa R1 B5)
@@ -883,14 +899,14 @@ M3이 관문·부하 표시의 시각 언어를 결정할 때 위 순서를 따�
 - [ ] `[사람]` **하루 재현 테스트를 실제로 수행하고 결과를 적었다.** 이름 있는 관문 수가 1~2개에 머물면 그 사실을 숨기지 않고 기록했다 (UI11 · DD9)
 - [ ] `[사람]` 브라우저에서 확장을 실제로 1회 로드해 마이그레이션과 관문 편집을 손으로 확인했다 — **하네스 통과가 경로 작동과 같지 않다**
 
-**`[사람]` 항목은 스물일곱 중 스물하나다.** 그 스물하나는 체크한다고 해서 참이 되지 않는다 —
-러너도 CI도 커밋 훅도 없으므로 이 목록의 **스물일곱 중 스물하나**는 약속이지 게이트가
+**`[사람]` 항목은 서른 중 스물셋이다.** 그 스물셋은 체크한다고 해서 참이 되지 않는다 —
+러너도 CI도 커밋 훅도 없으므로 이 목록의 **서른 중 스물셋**은 약속이지 게이트가
 아니다. **비율을 근사해서 적지 않는다** — "절반"·"일곱 중 다섯" 같은 어림수가 항목이
 늘 때마다 조용히 틀려지는 것이 아래 괄호가 기록한 사고의 원인이었다. 같은 수를 두 번
 적는다.
 (santa R0 에서 앞 문장이 "열하나"라 해 놓고 다음 문장이 "그 아홉"·"그 절반"이라
 적고 있는 것을 잡았다. 세 수가 서로 달랐고 어느 것도 목록과 맞지 않았다. 지금은
-`[기계]` 다섯 · `[기계+사람]` 하나 · `[사람]` 스물하나 = 스물일곱이며, 셋을 더할 때마다
+`[기계]` 다섯 · `[기계+사람]` 둘 · `[사람]` 스물셋 = 서른이며, 셋을 더할 때마다
 이 문단의 수를 같이 고친다.)
 스크린샷이나 붙여넣은 출력을 요구할 수는 있으나 위조가 체크박스보다 어렵지 않으므로
 강제가 아니라 의례가 된다. 헤드리스 러너 도입이 유일한 실질 수리이며 이 마일스톤
