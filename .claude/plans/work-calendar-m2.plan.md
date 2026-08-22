@@ -701,7 +701,7 @@ Task 7 허용 diff·Acceptance 세 자리를 동시에 흔들었고 그 셋이 �
 
 
 ### Task 7: 하네스 확충과 재베이스라인
-- **Action**: Task 2~6이 만든 케이스 **다섯**을 `runAll()` 순서에 넣는다. **무엇을 잇는지 세어 적는다**(R8 test F4 — "Task 2~6에서 더한 케이스"라고만 적으면 Task 3·4·6이 무엇을 더했는지가 다시 판단의 문제가 된다): 기존 `runCalendarV3MigrationCases` 바로 뒤에 `runCalendarV4MigrationCases`, 그 뒤에 `runCalendarV4EquivalenceCases`(등가 판정은 마이그레이션이 검증된 다음에만 의미가 있다), 이어서 `runCalendarProjectCases` · `runCalendarGateCases` · `runCalendarOnboardingCases`. **시계 경로 diff 0을 먼저 확인한 뒤** 달력 경로를 의도된 변경으로 재베이스라인한다. 단언 실패가 0건인지 마지막에 다시 본다.
+- **Action**: Task 2~5가 만든 케이스 **넷**을 `runAll()` 순서에 넣는다. **무엇을 잇는지 세어 적는다**(R8 test F4 — "Task 2~5에서 더한 케이스"라고만 적으면 무엇이 더해졌는지가 다시 판단의 문제가 된다): 기존 `runCalendarV3MigrationCases` 바로 뒤에 `runCalendarV4MigrationCases`, 그 뒤에 `runCalendarV4EquivalenceCases`(등가 판정은 마이그레이션이 검증된 다음에만 의미가 있다), 이어서 `runCalendarProjectCases` · `runCalendarGateCases`. **`runCalendarOnboardingCases`는 후반부가 만들고 후반부가 잇는다.** 시계 경로와 **달력 경로 둘 다 diff 0**을 확인한다 — 이 플랜은 화면을 바꾸지 않으므로 달력 쪽을 재베이스라인할 이유가 없고, diff가 났다면 점유나 렌더를 실수로 함께 고친 것이다. 단언 실패가 0건인지 마지막에 다시 본다.
   **재베이스라인 직후, `베이스라인 내보내기`를 다시 눌러 파일을 새로 받은 뒤** 뒤쪽 앵커를 뜬다(santa R2 B3 · **santa R3 B3이 그 답의 구멍을 잡았다**) — `shasum -a 256 test/positioning.smoke.js work-calendar-m2.baseline.json > .claude/plans/work-calendar-m2.rebaseline.sha256`.
 
   **재내보내기가 빠지면 앵커가 아무것도 묶지 못한다.** 재베이스라인은 하네스를 다시 돌려 새 스냅샷을 `chrome.storage.local`의 `__smokeBaseline`에 넣는 동작이고(`test/positioning.smoke.js:1122` 부근), 저장소 루트의 `work-calendar-m2.baseline.json`은 **Task 0이 한 번 내려받아 둔 파일일 뿐 그것과 연결돼 있지 않다.** 재내보내기 없이 해시를 뜨면 "Task 0의 옛 파일이 그동안 안 바뀌었다"만 증명하고, 정작 **비교에 실제로 쓰이는 베이스라인과 커밋된 파일이 같은가**는 증명하지 않는다. 순서를 못박는다 — (1) 재베이스라인, (2) `베이스라인 내보내기` 재클릭 후 받은 파일로 `work-calendar-m2.baseline.json` 덮어쓰기, (3) 그 파일과 하네스로 `rebaseline.sha256` 생성. Task 0의 `baseline.sha256`은 **구현 전 기록이라 여기서 갱신하지 않고 그대로 둔다**; 둘의 차이가 이 마일스톤이 하네스와 베이스라인을 어떻게 움직였는지의 감사 기록이다. 끝 상태 게이트(Validation 3)가 읽는 것은 뒤쪽이다.
@@ -771,7 +771,7 @@ node --check newtab.js
 #    **`) {` 로 닫히는 것**. (2)의 닫힘 요구가 호출과 선언을 가른다.
 #    이스케이프 없는 형태는 그대로 지킨다 — `[(]`·`[)]`·`[{]` 는 문자 클래스다.
 decl() { printf '(^(function|async[[:space:]]+function|const|let|var)[[:space:]]+%s[[:space:]]*[(=:]|^[[:space:]]*(async[[:space:]]+)?%s[[:space:]]*[(][^)]*[)][[:space:]]*[{])' "$1" "$1"; }
-for fn in runCalendarV4MigrationCases runCalendarV4EquivalenceCases runCalendarProjectCases runCalendarGateCases runCalendarOnboardingCases spyOn; do
+for fn in runCalendarV4MigrationCases runCalendarV4EquivalenceCases runCalendarProjectCases runCalendarGateCases spyOn; do
   grep -qE "$(decl $fn)" test/positioning.smoke.js || { echo "MISSING: $fn"; exit 1; }
 done
 #    newtab.js 함수 열하나 — createCalendarGate 가 R4 에서 빠져 있었다 (security F1 · test F3).
@@ -792,7 +792,7 @@ done
 #     통과하지 않고 죽는 쪽이므로 fail-closed 다.)
 runall() { sed -n '/^async function runAll(/,/^}/p' test/positioning.smoke.js; }
 [ "$(runall | wc -l)" -gt 5 ] || { echo "runAll() 본문을 뜨지 못했다 — 선언 형태가 바뀌었는지 확인하라"; exit 1; }
-for fn in runCalendarV4MigrationCases runCalendarV4EquivalenceCases runCalendarProjectCases runCalendarGateCases runCalendarOnboardingCases; do
+for fn in runCalendarV4MigrationCases runCalendarV4EquivalenceCases runCalendarProjectCases runCalendarGateCases; do
   runall | grep -q "$fn(collector)" || { echo "NOT WIRED into runAll(): $fn"; exit 1; }
 done
 
@@ -921,7 +921,7 @@ M3이 관문·부하 표시의 시각 언어를 결정할 때 위 순서를 따�
 - [ ] `[기계+사람]` **`runCalendarV4EquivalenceCases()`가 존재하고(기계) 단언 둘이 통과한다(사람)** — `meaning`(마감 상태 · 배너 문구)이 v3 규칙의 참조 구현이 낸 기대값과 같고, **점유도 마이그레이션 전후로 같다** (DD15·DD3, 후반부와 정반대 방향)
 - [ ] `[사람]` v2 → v3 → v4 연쇄 마이그레이션 케이스 통과. **340px 캐시 정리는 정황 증인이지 시동 실행의 증명이 아니다** (DD10·DD16, santa R6 B4 — Task 2가 "이 하네스로는 v3가 시동에서 돌았다를 증명할 수 없다"고 적어 두었는데 이 항목이 "단언됐다"고 말하고 있었다. v4가 같은 캐시 정리를 직접 구현하면 v3를 건너뛰고도 통과한다. 증명되는 것은 "v3 변환 함수가 옳다"와 "v2 입력이 v4 상태로 끝난다"까지이고, 누가 언제 불렀는가는 `Application.initialize()`를 사람이 읽어 확인한다)
 - [ ] `[기계]` **앵커 둘이 있고 뒤엣것이 통과한다** — Task 0이 `baseline.sha256`을(구현 전 기록), Task 7이 재베이스라인 직후 `rebaseline.sha256`을 남겼고, **`shasum -a 256 -c .claude/plans/work-calendar-m2.rebaseline.sha256`이 통과한다.** 앞엣것으로 끝 상태를 검사하지 않는다 — Task 2~7이 하네스를 고치므로 설계상 깨진다 (DD23, santa R2 B3)
-- [ ] `[기계]` **Validation 2번의 약속 이행 검사가 통과한다** — `newtab.js`의 함수 **열하나**(`promoteEventsToV3` · `promoteEventsToV4` · `deriveEventRange` · `createCalendarGate` · `createCalendarProject` · `loadProjects` · `persistProjects` · `reconcileProjectRefs` · `addGate` · `updateGate` · `removeGate`)과 하네스 산출물 **여섯**(케이스 다섯 — `runCalendarV4MigrationCases` · `runCalendarV4EquivalenceCases` · `runCalendarProjectCases` · `runCalendarGateCases` · `runCalendarOnboardingCases` — 과 `spyOn` 헬퍼)이 실제로 있고 등가 케이스가 `runAll()`에 연결됐다 (DD23. R4에서 `createCalendarGate`가 목록에서 빠져 개수가 맞지 않았다 — security F1. R5에서 `sanitizeImportedProjects`를 `reconcileProjectRefs`로 바꿨다 — DD28)
+- [ ] `[기계]` **Validation 2번의 약속 이행 검사가 통과한다** — `newtab.js`의 함수 **열하나**(`promoteEventsToV3` · `promoteEventsToV4` · `deriveEventRange` · `createCalendarGate` · `createCalendarProject` · `loadProjects` · `persistProjects` · `reconcileProjectRefs` · `addGate` · `updateGate` · `removeGate`)과 하네스 산출물 **다섯**(케이스 넷 — `runCalendarV4MigrationCases` · `runCalendarV4EquivalenceCases` · `runCalendarProjectCases` · `runCalendarGateCases` — 과 `spyOn` 헬퍼. `runCalendarOnboardingCases`는 후반부의 몫이라 여기서 세지 않는다)이 실제로 있고 등가 케이스가 `runAll()`에 연결됐다 (DD23. R4에서 `createCalendarGate`가 목록에서 빠져 개수가 맞지 않았다 — security F1. R5에서 `sanitizeImportedProjects`를 `reconcileProjectRefs`로 바꿨다 — DD28)
 - [ ] `[기계]` **Validation 2b번의 호출 자리 검사가 통과한다** — `deriveEventRange(` 4회 이상(선언 1 + DD26의 호출 3자리), `reconcileProjectRefs(` 3회 이상(선언 1 + DD28의 병목 2자리), `DD3-FIXTURE` 표식 4개 이상(Task 5의 고정 입력). **하한 검사이고 자리를 특정하지 못한다** — 특정은 아래 항목의 spy가 한다 (R7 invariant F3·F5)
 - [ ] `[사람]` **`deriveEventRange` 호출·결과 단언이 통과한다** — `promoteEventsToV4()`가 각 이벤트에 그것을 부르고, 승격된 전건의 `startDate`·`endDate`가 관문의 `min`·`max`와 일치한다 (DD26의 셋째 호출 자리, R4 architect F1)
 - [ ] `[사람]` **프로젝트 목록을 읽지 못한 상태에서는 강등하지 않는다** — `projectsLoaded`가 거짓일 때 `reconcileProjectRefs()`가 입력을 그대로 돌려주고, 가져온 이벤트의 `projectId`가 살아남는다 (R9 security F3 — 이것이 없으면 DD28이 참조 무결성 대신 데이터 소실을 만든다)
