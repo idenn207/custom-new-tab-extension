@@ -10,6 +10,9 @@
 .playwright-mcp/
 /banner-overlay.png
 
+# Git Bash(msys2)가 크래시할 때 cwd에 떨어뜨리는 스택 덤프. 기계 로컬 산출물이다.
+*.stackdump
+
 # 계획·리뷰 기록·PRD·리포트는 산출물이므로 추적한다.
 
 # >>> mccp runtime artifacts — managed by /mccp:setup >>>
