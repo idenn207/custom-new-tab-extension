@@ -235,13 +235,38 @@ R2 architect F3이 DD22의 실질적 위험을 지목했다 — `options.nextPro
 
 `loadEvents()`가 손상된 저장값을 읽으면 쓰기를 봉인하고 전체 교체만 남긴다(`newtab.js:2062`·`2151`). **프로젝트 쪽에는 그 봉인이 없었다.** `loadProjects()`가 실패해 `projectsLoadFailed`가 서고 `this.projects`가 `[]`로 남은 상태에서 사용자가 프로젝트를 하나 만들면, `persistProjects([새것])`이 `calendarProjects`를 그 한 건으로 **덮어써서 읽지 못했을 뿐 멀쩡히 있던 목록 전체가 사라진다.** `reconcileProjectRefs`의 `projectsLoaded` 인자는 이 경우를 막지 못한다 — 그것이 지키는 것은 이벤트의 `projectId` 강등이지 프로젝트 목록 자체가 아니다.
 
-`persistProjects()`는 **첫 줄에서 `this.projectsLoadFailed`를 보고 참이면 쓰지 않고 `false`를 돌려준다.** 이벤트 쪽과 같은 판단이고 같은 이유다 — 읽지 못한 것을 덮어쓰지 않는다. 호출부(프로젝트 CRUD·온보딩)는 `false`를 받으면 메모리·DOM을 되돌리고 `applyStorageNotice()`로 고지한다(`newtab.js:459`). 봉인을 푸는 유일한 경로는 이벤트 쪽과 동형인 **전체 교체**이며, 그 경로는 M2.5의 복구가 만든다 — M2에서는 봉인만 세우고 해제 수단을 만들지 않는다. 그것이 이 마일스톤이 감당할 수 있는 정직한 범위다.
+`persistProjects()`는 **첫 줄에서 `this.projectsLoadFailed`를 보고 참이면 쓰지 않고 `false`를 돌려준다.** 이벤트 쪽과 같은 판단이고 같은 이유다 — 읽지 못한 것을 덮어쓰지 않는다. 봉인을 푸는 유일한 경로는 이벤트 쪽과 동형인 **전체 교체**이며, 그 경로는 M2.5의 복구가 만든다 — M2에서는 봉인만 세우고 해제 수단을 만들지 않는다. 그것이 이 마일스톤이 감당할 수 있는 정직한 범위다.
 
-**DD27b — 원자적 쓰기가 성공한 뒤에야 `this.projects`를 갈아 끼운다.** (santa R0 B4, HIGH)
+**부분 손상도 읽기 실패다** (santa R1 B2, CRITICAL). R0에서 이 결정을 쓸 때 봉인의 발동 조건을 "값이 배열이 아닌 것"으로만 두었다. 그런데 Task 3은 읽은 배열의 각 항목을 `createCalendarProject()`에 통과시키고 **`null`을 버린다.** 그래서 배열은 맞는데 항목 하나가 손상된 경우 — `projectsLoadFailed`는 **거짓**으로 남고, `this.projects`는 그 하나가 빠진 채로 서고, 다음 `persistProjects()`나 `replaceEvents()`가 `{ projectsLoaded: true }`로 **정상 읽기라고 선언하며** 강등을 돌린다. 버려진 프로젝트를 가리키던 이벤트가 전건 `projectId: null`이 되고, 저장소에는 그 프로젝트가 **멀쩡히 있는데도** 그렇게 커밋된다.
 
-`persistEvents()`는 성공한 뒤에 메모리·인덱스·DOM을 커밋하고 실패하면 아무것도 건드리지 않아 자동 롤백된다(`newtab.js:2146`). DD27은 그 껍데기만 씌웠을 뿐 **`this.projects`를 언제 갈아 끼우는지를 적지 않았다.** 적지 않으면 두 방향으로 틀린다 — 쓰기 전에 대입하면 실패했을 때 메모리가 저장소보다 앞서 나가고, 영영 대입하지 않으면 새로고침 전까지 화면이 옛 목록을 보여 준다.
+이것은 R9 security F3이 잡았던 "빈 목록으로 강등"과 **같은 결함의 부분 버전**이고, 그 답이 부분 손상을 덮지 못했다. 규칙을 하나로 적는다 — **`createCalendarProject()`가 `null`을 돌려준 항목이 하나라도 있으면 `projectsLoadFailed = true`를 세운다.** 저장된 것을 온전히 읽지 못했다는 사실이 봉인의 조건이지, 못 읽은 양이 얼마인가가 아니다. 버린 항목 수는 콘솔에 고지한다(`migrateCalendarToV3()`의 `catch` 고지와 같은 자리, 같은 판단).
 
-`persistProjects(nextProjects)`는 `persistEvents(...)`의 반환값이 참일 때에만 `this.projects = nextProjects`를 하고 그 값을 돌려준다. 거짓이면 `this.projects`를 건드리지 않는다. 이벤트와 프로젝트가 **같은 `set()`으로 커밋되고 같은 조건으로 메모리에 반영된다**는 것이 DD22 원자성이 실제로 뜻하는 바다.
+**DD27c — 프로젝트 실패를 사람에게 말하려면 `applyStorageNotice()`를 늘려야 한다. 부르는 것만으로는 아무 말도 하지 않는다.** (santa R1 B3, HIGH)
+
+DD27a를 처음 쓸 때 "호출부는 `false`를 받으면 `applyStorageNotice()`로 고지한다(`newtab.js:459`)"고 적었다. **그 함수는 그 말을 할 수 없다.** 현재 서명은 `applyStorageNotice({ migrationFailed })` 하나이고 내는 문구는 셋뿐이다 — 미리보기 저장소 · 저장소 없음 · 설정 마이그레이션 실패. 프로젝트 읽기 실패도, 프로젝트 쓰기 실패도 담을 자리가 없다. 시키는 대로 부르면 **사용자는 아무 고지도 못 받고** 프로젝트가 없는 화면이나 되돌아간 변경만 본다.
+
+`applyStorageNotice(state)`의 `state`에 `projectsLoadFailed`를 더하고 문구 하나를 잇는다 — `'프로젝트 목록을 읽지 못했습니다 · 프로젝트 변경이 잠겨 있습니다'`. `messages` 배열에 밀어 넣는 기존 형태 그대로이고 새 표면을 만들지 않는다(UI4). `Application.initialize()`가 `loadProjects()` 뒤에 그 값을 넘긴다.
+
+쓰기 실패는 다르게 다룬다 — 그쪽은 상시 고지가 아니라 **그 순간의 오류**이므로 `persistEvents()`가 이미 쓰는 `this.showError()`(`newtab.js:2177`)를 탄다. 프로젝트 쓰기는 `persistEvents()`를 통과하므로(DD27) 그 경로가 자동으로 붙고, 따로 만들 것이 없다. **상시 상태는 `applyStorageNotice`, 일회성 실패는 `showError` — 이 저장소가 이미 쓰고 있는 갈래를 그대로 따른다.**
+
+**DD27b — `this.projects` 대입은 `persistEvents()` **안**, `this.events` 대입 바로 옆이다.** (santa R0 B4 · **santa R1 B1이 R0의 답을 반려했다**, CRITICAL)
+
+R0에서 이 결정을 처음 쓸 때 "`persistProjects()`가 `persistEvents(...)`의 반환값이 참일 때에만 `this.projects`를 대입한다"고 적었다. **그 답은 틀렸고, 두 겹으로 틀렸다.**
+
+1. **`persistEvents()`는 `async`다**(`newtab.js:2146`). `const ok = this.persistEvents(...)`는 `Promise`를 받고 `if (ok)`는 **언제나 참**이다. 쓰기가 실패해도 `this.projects`가 갈아 끼워진다 — 이 결정이 막으려던 바로 그 일이 일어난다
+2. `await`를 붙여 1번을 고쳐도 남는다. `persistEvents()`는 성공 경로에서 **반환하기 전에 `this.render()`를 부른다**(`newtab.js:2170`). 그러므로 `await` 뒤의 대입은 렌더보다 늦고, 이름을 바꾸거나 프로젝트를 지운 직후의 화면이 **옛 목록으로 그려진다.** 다음 렌더까지 그대로 남는다
+
+두 겹 다 **대입을 `persistProjects()`에 둔 것**에서 나온다. 자리를 옮기면 둘 다 사라진다 — `persistEvents()`가 `options.nextProjects`를 받았을 때, 성공 블록에서 `this.events = nextEvents` **바로 다음, `this.render()` 앞에** `this.projects = options.nextProjects`를 한다. `opToken !== this.opSeq` 재입력 가드와 `catch`의 자동 롤백을 이벤트와 **똑같이** 탄다.
+
+```js
+// persistEvents() 성공 블록 (newtab.js:2160 부근)
+this.events = nextEvents;
+if (options && options.nextProjects) this.projects = options.nextProjects;   // DD27b
+this.pending = null;
+// ... 이하 기존 그대로, this.render() 는 이 뒤에 있다
+```
+
+그러면 `persistProjects()`는 다시 얇아진다 — `async`이고, DD27a 가드 뒤에 `return this.persistEvents(...)` 하나다. **이것이 DD22 원자성이 실제로 뜻하는 바다**: 한 번의 `set()`으로 커밋되고, 같은 조건으로 메모리에 반영되고, **같은 렌더에 보인다.** 셋 중 하나라도 갈라지면 원자적이지 않다.
 
 **DD28 — 끊긴 `projectId`를 되돌리는 자리도 하나다. `reconcileProjectRefs()`가 그것이다.**
 
@@ -286,7 +311,7 @@ MEDIUM 으로, test 는 CRITICAL 둘에서 0 으로 내려갔다. 그런데 **in
 앞으로 옮겼다: `[기계]` · `[사람]` · `[기계+사람]`. 열일곱 중 열하나가 `[사람]` 이라는
 사실이 이제 목록을 훑기만 해도 보인다.
 
-**이것으로 강제되지 않는 열다섯이 강제되지는 않는다.** 바뀐 것은 그 열다섯이 강제되지
+**이것으로 강제되지 않는 열아홉이 강제되지는 않는다.** 바뀐 것은 그 열아홉이 강제되지
 않는다는 사실을 **숨기기 어려워졌다**는 것뿐이고, 그것이 이 저장소에서 가능한 전부다
 (DD23). R7 invariant 가 낸 열 건 중 다섯(F1·F2·F4·F6·F8)이 "플랜이 강제 불가를 스스로
 적어 놓고 체크박스로 올렸다"의 변주였는데, 그중 실제로 고칠 수 있는 잔여는 이 배치
@@ -454,7 +479,10 @@ M3의 몫이다(DD31의 경계는 Summary에 한 문장으로 적었다).
      위험하고, 그것을 막는 것이 이 플래그다.
 
      읽은 배열로 `this.projects` 를 세운다. 각 항목은 `createCalendarProject()` 를
-     통과시키고 `null` 은 버린다. `Application.initialize()` 에서 `loadEvents()` 와
+     통과시키고 `null` 은 버리되, **버린 것이 하나라도 있으면 `projectsLoadFailed` 를**
+     **참으로 세우고 버린 개수를 콘솔에 고지한다**(DD27a, santa R1 B2). 배열이 맞아도
+     항목이 손상됐으면 저장된 것을 온전히 읽지 못한 것이고, 그 목록을 근거로 강등하면
+     저장소에 멀쩡히 있는 프로젝트를 가리키던 이벤트가 전건 무소속으로 내려앉는다. `Application.initialize()` 에서 `loadEvents()` 와
      같은 자리에 잇는다. (santa R0 — 이 자리에 `를 세운다. 각 항목은…` 으로 시작하는
      주어 없는 문장 토막이 남아 있었다. 앞선 라운드의 편집 사고이고 구현자가 무엇을
      세우라는 것인지 읽어 낼 수 없었다.)
@@ -468,19 +496,23 @@ M3의 몫이다(DD31의 경계는 Summary에 한 문장으로 적었다).
   4. `persistProjects(nextProjects)` — 프로젝트를 바꾸는 **유일한** 쓰기 경로 (DD27). 본문은 **세 줄**이고 순서가 계약이다 (santa R0 B3·B4):
 
      ```js
-     if (this.projectsLoadFailed) return false;                       // DD27a — 읽지 못한 것을 덮어쓰지 않는다
-     const ok = this.persistEvents(
-       reconcileProjectRefs(this.events, nextProjects, { projectsLoaded: !this.projectsLoadFailed }),
-       { nextProjects });
-     if (ok) this.projects = nextProjects;                            // DD27b — 성공한 뒤에만 갈아 끼운다
-     return ok;
+     async persistProjects(nextProjects) {
+       if (this.projectsLoadFailed) return false;                     // DD27a — 읽지 못한 것을 덮어쓰지 않는다
+       return this.persistEvents(
+         reconcileProjectRefs(this.events, nextProjects, { projectsLoaded: !this.projectsLoadFailed }),
+         { nextProjects });                                           // DD27b — 대입은 persistEvents 안에서 한다
+     }
      ```
 
-     첫 줄이 없으면 목록을 읽지 못한 상태에서 프로젝트 하나를 만드는 것만으로
-     `calendarProjects` 전체가 그 한 건으로 덮여 사라진다(DD27a). 셋째 줄이 없으면
-     쓰기가 실패해도 메모리가 앞서 나가거나(먼저 대입한 경우) 화면이 새로고침 전까지
-     옛 목록을 보여 준다(영영 대입하지 않은 경우)(DD27b). 호출부는 `false` 를 받으면
-     메모리·DOM 을 되돌리고 `applyStorageNotice()`(`newtab.js:459`) 로 고지한다
+     가드가 없으면 목록을 읽지 못한 상태에서 프로젝트 하나를 만드는 것만으로
+     `calendarProjects` 전체가 그 한 건으로 덮여 사라진다(DD27a). **`async` 와**
+     **`persistEvents` 안 대입은 둘 다 필수다** — `persistEvents` 는 `async` 라
+     반환값을 그냥 `if` 로 보면 Promise 가 언제나 참이고, 대입을 이 함수에 두면
+     `persistEvents` 안의 `render()` 보다 늦어 화면이 옛 목록을 그린다(DD27b,
+     santa R1 B1). 호출부는 `false` 를 받으면 메모리·DOM 을 되돌린다 — 상시 고지는
+     `applyStorageNotice` 가 **늘어난 서명으로** 하고(DD27c) 일회성 쓰기 실패는
+     `persistEvents` 의 `showError`(`newtab.js:2177`) 가 이미 한다
+  4a. `applyStorageNotice(state)`(`newtab.js:459`) — **이 Task가 고친다**(DD27c). `state` 에 `projectsLoadFailed` 를 더하고 `messages` 에 `'프로젝트 목록을 읽지 못했습니다 · 프로젝트 변경이 잠겨 있습니다'` 를 잇는다. `Application.initialize()` 가 `loadProjects()` 뒤에 그 값을 넘긴다. **현재 서명은 `{ migrationFailed }` 하나여서 프로젝트 실패를 담을 자리가 없다** — 늘리지 않고 부르면 사용자는 아무 고지도 못 받는다(santa R1 B3)
   5. `reconcileProjectRefs(events, projects, { projectsLoaded })` → **새 배열** — `projects` 에
      없는 `projectId` 를 `null` 로 내린다 (DD28). 입력 배열을 in-place 변형하지 않는다
      (`newtab.js:2140`). 강등 건수를 콘솔에 고지한다.
@@ -569,9 +601,10 @@ M3의 몫이다(DD31의 경계는 Summary에 한 문장으로 적었다).
   **이 Task가 고치는 것 — 렌더 경로다. 새 시각 언어를 만들지 않는다(UI4).**
   - `getEventDueState()`(`newtab.js:2627`) — 종단 관문을 읽게 바꾼다(DD3)
   - `rebuildIndex()` — **`event.gates`를 돌며 `g.planned` 각각을 버킷에 넣는다. 파생 `startDate`·`endDate`는 인덱스 입력에서 뺀다** (DD31·UI15). 월·수 관문이면 화요일 버킷은 비어 있어야 한다. `dropped` 관문도 넣는다(계획은 남는다)
+  - `getEventsForDate(dateKey)`(`newtab.js:2129`) — **같이 바꾼다**(DD31, santa R1 B5). 현재 규칙은 `event.startDate <= dateKey && dateKey <= event.endDate`라는 **범위 조회**이고 창 인덱스를 일부러 우회한다(패널이 렌더 창 밖 날짜를 열 수 있어서다 — 그 주석이 `newtab.js:2124`에 있다). 그대로 두면 그리드는 화요일을 비워 두는데 **화요일 칸을 누르면 패널에 그 이벤트가 나온다.** `event.gates.some((g) => g.planned === dateKey)`로 바꾼다 — 인덱스를 우회하는 이유(창 밖 조회)는 그대로 지키면서 점유의 정의만 관문으로 맞춘다
   - `renderSummary` · `renderGrid` · `createDayCell` · `createChips` · `renderPanel` · `createTodoItem` — 새 데이터를 읽되 기존 칩·뱃지 토큰을 그대로 쓴다
 
-  세부는 아래에 잇는다. `getEventDueState()`가 **종단 관문**을 읽게 바꾼다(DD3) — 파생 `endDate`와 같은 값이므로 결과는 마이그레이션 전후로 동일해야 한다. `rebuildIndex()`가 **`gates[].planned`로 셀을 채운다** — 파생 범위로 채우던 현재 동작을 **버린다**(DD31·UI15). 이것이 이 Task에서 마이그레이션 전후 화면이 의도적으로 달라지는 **유일한** 지점이고, 그 차이가 곧 M2가 약속한 불연속 배치다. `renderSummary`·`renderGrid`·`createDayCell`·`createChips`·`renderPanel`·`createTodoItem`이 새 데이터를 읽되 **새 시각 언어를 만들지 않는다**(UI4) — 프로젝트는 기존 뱃지 자리에 이름만, 관문은 기존 칩 형태 그대로다. 겹침 경고를 만들지 않고 부하 표시도 하지 않는다(UI5, M3의 몫).
+  세부는 아래에 잇는다. `getEventDueState()`가 **종단 관문**을 읽게 바꾼다(DD3) — 파생 `endDate`와 같은 값이므로 결과는 마이그레이션 전후로 동일해야 한다. `rebuildIndex()`가 **`gates[].planned`로 셀을 채운다** — 파생 범위로 채우던 현재 동작을 **버린다**(DD31·UI15). 이것이 이 Task에서 마이그레이션 전후 화면이 의도적으로 달라지는 **유일한** 지점이고, 그 차이가 곧 M2가 약속한 불연속 배치다. **점유를 읽는 자리가 둘이므로 둘 다 바꾼다** — 그리드는 `rebuildIndex()`의 버킷을 보고 패널은 `getEventsForDate()`의 범위 조회를 본다(`newtab.js:2874` → `2129`). 하나만 바꾸면 그리드가 비워 둔 날을 눌렀을 때 패널이 그 이벤트를 낸다(santa R1 B5). **한 날짜에 대해 그리드와 패널이 다른 답을 내면 불연속 배치는 구현된 것이 아니라 반쯤 구현된 것이고, 사용자가 보는 것은 버그다.** `renderSummary`·`renderGrid`·`createDayCell`·`createChips`·`renderPanel`·`createTodoItem`이 새 데이터를 읽되 **새 시각 언어를 만들지 않는다**(UI4) — 프로젝트는 기존 뱃지 자리에 이름만, 관문은 기존 칩 형태 그대로다. 겹침 경고를 만들지 않고 부하 표시도 하지 않는다(UI5, M3의 몫).
 - **Mirror**: `newtab.js:2655` `render()`의 호출 순서와 `2757` `createDayCell()`의 aria-label 구성
 - **Validate**: `runCalendarV4EquivalenceCases(collector)`를 새로 만든다. **이 함수가 DD3·DD4의 기계적 단언을 산출하는 자리이며, 이름이 없으면 그 단언은 존재하지 않는다**(R0 test F1·F2·F4가 막은 것이 정확히 이 부재다).
   - **왜 `snapshot()`이 아닌가.** `snapshot()`(`test/positioning.smoke.js:191`)은 위젯 기하만 담는다 — 마감 의미가 통째로 뒤집혀도 사각형은 움직이지 않으므로 그 diff는 DD3을 지키지 못한다(DD15).
@@ -658,11 +691,27 @@ decl() { printf '(^|[^A-Za-z0-9_])(function[[:space:]]+|const[[:space:]]+|let[[:
 for fn in runCalendarV4MigrationCases runCalendarV4EquivalenceCases runCalendarProjectCases runCalendarGateCases runCalendarOnboardingCases spyOn; do
   grep -qE "$(decl $fn)" test/positioning.smoke.js || { echo "MISSING: $fn"; exit 1; }
 done
-#    newtab.js 함수 일곱 — createCalendarGate 가 R4 에서 빠져 있었다 (security F1 · test F3)
+#    newtab.js 함수 열하나 — createCalendarGate 가 R4 에서 빠져 있었다 (security F1 · test F3).
+#    (santa R1 자체 발견: 이 주석이 "일곱"이라 적혀 있었는데 아래 목록은 열하나다.
+#     Acceptance 쪽은 처음부터 열하나로 맞아 있었으므로 틀린 것은 이 주석이었다.)
 for fn in promoteEventsToV3 promoteEventsToV4 deriveEventRange createCalendarGate createCalendarProject loadProjects persistProjects reconcileProjectRefs addGate updateGate removeGate; do
   grep -qE "$(decl $fn)" newtab.js || { echo "MISSING: $fn"; exit 1; }
 done
-grep -q "runCalendarV4EquivalenceCases(collector)" test/positioning.smoke.js || { echo "NOT WIRED into runAll()"; exit 1; }
+#    배선 검사 — 다섯 **전부**를 `runAll()` **본문 안에서** 찾는다 (santa R1 B4).
+#    앞선 판은 `grep -q "runCalendarV4EquivalenceCases(collector)"` 하나였는데,
+#    **그 문자열은 선언부 `function runCalendarV4EquivalenceCases(collector) {` 자신에**
+#    **매치되므로 배선을 하나도 안 해도 통과한다.** 게다가 다섯 중 하나만 봤다.
+#    범위를 runAll 본문으로 좁히면 선언부가 빠지고, 그때 남는 매치는 호출뿐이다.
+#    (전제: `runAll` 은 column 0 의 `async function runAll(` 로 시작해 column 0 의
+#     `}` 로 끝난다 — 현재 test/positioning.smoke.js:975·1018 이 그 형태이고,
+#     기존 호출도 `await runBandInvariance(collector);` 처럼 본문 안에 있다.
+#     runAll 을 들여쓰거나 중첩 함수로 바꾸면 이 검사가 먼저 죽는다 — 조용히
+#     통과하지 않고 죽는 쪽이므로 fail-closed 다.)
+runall() { sed -n '/^async function runAll(/,/^}/p' test/positioning.smoke.js; }
+[ "$(runall | wc -l)" -gt 5 ] || { echo "runAll() 본문을 뜨지 못했다 — 선언 형태가 바뀌었는지 확인하라"; exit 1; }
+for fn in runCalendarV4MigrationCases runCalendarV4EquivalenceCases runCalendarProjectCases runCalendarGateCases runCalendarOnboardingCases; do
+  runall | grep -q "$fn(collector)" || { echo "NOT WIRED into runAll(): $fn"; exit 1; }
+done
 
 # 2b. 호출 자리 검사 — DD26·DD28 의 불변식은 "존재"가 아니라 "부르는 자리"다
 #     (R7 invariant F3·F5). 존재만 보면 선언해 놓고 아무 데서도 부르지 않는
@@ -783,17 +832,24 @@ M3이 관문·부하 표시의 시각 언어를 결정할 때 위 순서를 따�
 - [ ] `[사람]` **프로젝트 목록을 읽지 못한 상태에서는 강등하지 않는다** — `projectsLoaded`가 거짓일 때 `reconcileProjectRefs()`가 입력을 그대로 돌려주고, 가져온 이벤트의 `projectId`가 살아남는다 (R9 security F3 — 이것이 없으면 DD28이 참조 무결성 대신 데이터 소실을 만든다)
 - [ ] `[사람]` **프로젝트 목록을 읽지 못했으면 프로젝트를 쓰지 않는다** — `projectsLoadFailed`가 참인 상태에서 `persistProjects()`가 `storage.set`을 **한 번도 부르지 않고** `false`를 돌려주고, 저장소의 `calendarProjects`가 그대로인지 단언한다 (DD27a, santa R0 B3)
 - [ ] `[사람]` **쓰기가 실패하면 `this.projects`가 옛 값 그대로다** — `storage.set`을 실패하게 만든 뒤 `persistProjects(next)`가 `false`를 돌려주고 `this.projects !== next`인지, 성공하면 `this.projects === next`인지 양쪽을 단언한다 (DD27b, santa R0 B4)
+- [ ] `[사람]` **성공한 프로젝트 변경이 그 렌더에 보인다** — `spyOn`으로 `render`를 감싸고, `persistProjects(next)` 성공 시 **render가 불린 시점에 이미 `this.projects === next`**인지 단언한다. 대입이 `persistEvents()` 밖에 있으면 render가 옛 목록으로 돌아 이 단언이 죽는다 (DD27b, santa R1 B1)
+- [ ] `[사람]` **항목 하나가 손상돼도 봉인된다** — `calendarProjects`를 배열로 두되 한 항목만 망가뜨린 뒤, `projectsLoadFailed`가 참이 되고 `persistProjects()`가 `false`를 돌려주며 **그 프로젝트를 가리키던 이벤트의 `projectId`가 살아 있는지** 단언한다 (DD27a, santa R1 B2)
+- [ ] `[사람]` **프로젝트 읽기 실패가 화면에 고지된다** — `applyStorageNotice({ projectsLoadFailed: true })`가 `storageNotice`에 프로젝트 문구를 낸다. 늘어난 서명을 안 쓰면 아무 문구도 안 나와 죽는다 (DD27c, santa R1 B3)
+- [ ] `[사람]` **그리드와 패널이 같은 날짜에 같은 답을 낸다** — `today-3`·`today` 관문 이벤트에서 `today-1` 셀이 비어 있고 **그 날짜의 `getEventsForDate()`도 빈 배열인지** 단언한다. 둘 중 하나만 고치면 여기서 죽는다 (DD31, santa R1 B5)
 - [ ] `[사람]` **프로젝트+이벤트 커밋이 `set()` 한 번이다** — `spyOn`으로 `storage.set` 호출 수를 세어 프로젝트 변경 경로에서 정확히 1인지 단언한다 (DD22·DD27, R9 security F2)
 - [ ] `[사람]` **끊긴 프로젝트 참조가 두 경로 모두에서 강등된다** — 프로젝트 삭제와 가져오기 각각에서 `projectId`가 `null`로 내려앉고 **이벤트 수가 줄지 않으며**, 로컬 프로젝트가 가져오기로 사라지지 않는다 (DD7·DD28)
 - [ ] `[기계]` PRD M2 행 `complete`, Open Question 1 해소 표기
 - [ ] `[사람]` **하루 재현 테스트를 실제로 수행하고 결과를 적었다.** 이름 있는 관문 수가 1~2개에 머물면 그 사실을 숨기지 않고 기록했다 (UI11 · DD9)
 - [ ] `[사람]` 브라우저에서 확장을 실제로 1회 로드해 마이그레이션과 관문 편집을 손으로 확인했다 — **하네스 통과가 경로 작동과 같지 않다**
 
-**`[사람]` 항목은 스물하나 중 열다섯이다.** 그 열다섯은 체크한다고 해서 참이 되지 않는다 —
-러너도 CI도 커밋 훅도 없으므로 이 목록의 **일곱 중 다섯**은 약속이지 게이트가 아니다.
+**`[사람]` 항목은 스물다섯 중 열아홉이다.** 그 열아홉은 체크한다고 해서 참이 되지 않는다 —
+러너도 CI도 커밋 훅도 없으므로 이 목록의 **스물다섯 중 열아홉**은 약속이지 게이트가
+아니다. **비율을 근사해서 적지 않는다** — "절반"·"일곱 중 다섯" 같은 어림수가 항목이
+늘 때마다 조용히 틀려지는 것이 아래 괄호가 기록한 사고의 원인이었다. 같은 수를 두 번
+적는다.
 (santa R0 에서 앞 문장이 "열하나"라 해 놓고 다음 문장이 "그 아홉"·"그 절반"이라
 적고 있는 것을 잡았다. 세 수가 서로 달랐고 어느 것도 목록과 맞지 않았다. 지금은
-`[기계]` 다섯 · `[기계+사람]` 하나 · `[사람]` 열다섯 = 스물하나이며, 셋을 더할 때마다
+`[기계]` 다섯 · `[기계+사람]` 하나 · `[사람]` 열아홉 = 스물다섯이며, 셋을 더할 때마다
 이 문단의 수를 같이 고친다.)
 스크린샷이나 붙여넣은 출력을 요구할 수는 있으나 위조가 체크박스보다 어렵지 않으므로
 강제가 아니라 의례가 된다. 헤드리스 러너 도입이 유일한 실질 수리이며 이 마일스톤
