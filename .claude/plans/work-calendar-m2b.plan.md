@@ -92,7 +92,9 @@ santa 루프가 8라운드를 돌고 캡에서 종료했다(`.claude/reviews/san
 
 ### DD13 — 첫 실행 온보딩은 "프로젝트가 없다"와 "못 읽었다"를 가른다
 
-프로젝트가 하나도 없을 때 한 번 뜨는 안내를 만든다. 조건은 **`this.calendarManager.projects.length === 0 && !this.calendarManager.projectsLoadFailed`** **둘 다**이다.
+프로젝트가 하나도 없을 때 한 번 뜨는 안내를 만든다. 조건은 **`this.calendarManager.projects.length === 0 && !this.calendarManager.projectsLoadFailed && !onboardingSeen`** **셋 다**이다.
+
+**셋째 항이 없으면 "한 번만" 이 성립하지 않는다**(santa R8 B1). 앞선 판은 아래 Task 3 에 "건너뛴 경우에도 다시 뜨지 않는 플래그를 저장한다" 를 적어 두고 **판정식에는 그 플래그를 넣지 않았다.** 그러면 건너뛰기를 누른 사용자나 나중에 프로젝트를 전부 지워 다시 0개가 된 사용자에게 **초기화할 때마다 온보딩이 다시 뜬다** — 무소속을 정상 상태로 두겠다는 UI8 을 깨고 프로젝트 생성을 사실상 반복 강제한다. **플래그를 이름으로 못박는다** — 설정 키 `calendarOnboardingSeen`(불리언, 기본 `false`)이고, **프로젝트를 만들었을 때와 건너뛰었을 때 둘 다** `true` 로 쓴다. 읽기·쓰기 주체는 `SettingsManager` 이며(다른 설정 키와 같은 경로), 읽기 실패로 온보딩이 뜨지 않은 경우에는 **쓰지 않는다** — 그 상태는 첫 실행이 아니기 때문이다.
 
 **소유자를 붙여 적는다**(santa R6 B1). 이 판정이 붙는 자리는 `Application.initialize()` 이고 거기서 `this` 는 `Application` 이다. **그 클래스에는 `projects` 도 `projectsLoadFailed` 도 없다** — 둘 다 `CalendarManager` 의 필드다. bare `this.projects` 로 적으면 구현이 `undefined.length` 에서 터지거나, 구현자가 소유자를 임의로 추측해 첫 실행에 온보딩이 안 뜨거나 초기화가 끊긴다. 전반부가 같은 값을 `this.calendarManager.projectsLoadFailed` 로 넘기라고 적고 있으므로(`work-calendar-m2.plan.md` Task 3 item 4b) 두 플랜이 같은 이름을 쓴다.
 
@@ -216,7 +218,7 @@ santa 루프가 8라운드를 돌고 캡에서 종료했다(`.claude/reviews/san
 
   **고치는 것**: `Application.initialize()` — 온보딩 판정을 잇는다.
 
-  조건은 **`this.calendarManager.projects.length === 0 && !this.calendarManager.projectsLoadFailed`** **둘 다**이다(DD13 — 소유자를 붙여 적는다. 이 자리의 `this` 는 `Application` 이고 그 클래스에는 두 필드가 **없다**, santa R6 B1). 이름 하나를 받아 프로젝트를 만들고, 건너뛰면 무소속으로 계속 쓴다. **건너뛴 경우에도 다시 뜨지 않는 플래그**를 저장한다.
+  조건은 **`this.calendarManager.projects.length === 0 && !this.calendarManager.projectsLoadFailed`** **둘 다**이고, 여기에 **`&& !onboardingSeen` 셋째 항이 붙는다**(DD13 — 소유자를 붙여 적는다. 이 자리의 `this` 는 `Application` 이고 앞 두 필드는 그 클래스에 **없다**, santa R6 B1). 이름 하나를 받아 프로젝트를 만들고, 건너뛰면 무소속으로 계속 쓴다. **플래그는 설정 키 `calendarOnboardingSeen`**(불리언, 기본 `false`)이고 **만들었을 때와 건너뛰었을 때 둘 다** `true` 로 쓴다 — 셋째 항이 판정식에 없으면 건너뛴 사용자에게 매 초기화마다 다시 뜬다(santa R8 B1).
 - **Mirror**: `newtab.js:459` `applyStorageNotice()` — 상시 표면을 늘리지 않고 필요할 때만 나타난다
 - **Validate**: 하네스 케이스 — 프로젝트가 없으면 뜨고, 건너뛰면 다시 뜨지 않고, **읽기 실패 상태(`projectsLoadFailed = true`)에서는 뜨지 않고 플래그도 타지 않으며**, 온보딩이 밴드 높이와 패널 스크롤을 바꾸지 않는다(`test/positioning.smoke.js:909` `runErrorBannerGeometryCases()`와 같은 형태)
 
