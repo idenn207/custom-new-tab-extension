@@ -86,7 +86,9 @@ santa 루프가 8라운드를 돌고 캡에서 종료했다(`.claude/reviews/san
 
 ### DD13 — 첫 실행 온보딩은 "프로젝트가 없다"와 "못 읽었다"를 가른다
 
-프로젝트가 하나도 없을 때 한 번 뜨는 안내를 만든다. 조건은 `this.projects.length === 0 && !this.projectsLoadFailed` **둘 다**이다.
+프로젝트가 하나도 없을 때 한 번 뜨는 안내를 만든다. 조건은 **`this.calendarManager.projects.length === 0 && !this.calendarManager.projectsLoadFailed`** **둘 다**이다.
+
+**소유자를 붙여 적는다**(santa R6 B1). 이 판정이 붙는 자리는 `Application.initialize()` 이고 거기서 `this` 는 `Application` 이다. **그 클래스에는 `projects` 도 `projectsLoadFailed` 도 없다** — 둘 다 `CalendarManager` 의 필드다. bare `this.projects` 로 적으면 구현이 `undefined.length` 에서 터지거나, 구현자가 소유자를 임의로 추측해 첫 실행에 온보딩이 안 뜨거나 초기화가 끊긴다. 전반부가 같은 값을 `this.calendarManager.projectsLoadFailed` 로 넘기라고 적고 있으므로(`work-calendar-m2.plan.md` Task 3 item 4b) 두 플랜이 같은 이름을 쓴다.
 
 전반부의 DD27a가 읽기 실패를 `this.projects = []` + `projectsLoadFailed = true`로 표현하므로, 앞 조건만 보면 **프로젝트가 멀쩡히 있는데 못 읽은 상태**가 "첫 실행"으로 오인된다. 그러면 둘 중 하나가 난다 — 안내를 따라 프로젝트를 만들려 해도 `persistProjects()`가 봉인돼 실패하거나, 건너뛰기를 눌러 **한 번뿐인 온보딩 플래그를 첫 실행도 아닌데 태운다.**
 
@@ -162,7 +164,7 @@ santa 루프가 8라운드를 돌고 캡에서 종료했다(`.claude/reviews/san
      **각 고정 입력 줄에 주석 표식 `DD31-FIXTURE`를 단다.** Validation이 그 표식을 세어 **다섯** 미만이면 죽는다. 표식이 값의 정확성을 증명하지는 않지만, "폭 없는 항목만으로 케이스를 써 두어 DD31이 구현되지 않아도 통과하는" 실패 모양은 확실히 잡는다.
 
   **고치는 것 — 둘이고 둘 다 필수다(DD32).**
-  - `rebuildIndex()`(`newtab.js:2097`) — `event.gates`를 돌며 `g.planned` 각각을 버킷에 넣는다. **파생 `startDate`·`endDate`는 인덱스 입력에서 뺀다.** `dropped` 관문도 넣는다
+  - `rebuildIndex()`(`newtab.js:2097`) — 이벤트마다 `event.gates` 의 `g.planned` 를 **집합으로 접은 뒤**(`new Set(...)`) 그 **고유 날짜마다 이벤트를 한 번씩** 버킷에 넣는다. **관문마다 넣지 않는다** — DD25 가 같은 날 `dev`·`review` 를 허용하므로 관문 단위로 넣으면 한 이벤트가 같은 버킷에 두 번 들어가고, 그리드는 칩 둘 · 패널은 하나가 되어 DD32 가 막으려는 불일치가 돌아온다(DD31). **그 접기 규칙이 DD31 본문과 아래 고정 입력 5번에는 있었는데 이 지시 줄에만 없었다** — Action 만 읽은 구현자가 그대로 이중 삽입을 만들게 돼 있었고, DD29 가 금지한 "규칙은 산문에, 지시에는 없음" 이 바로 이 모양이다 (santa R6 A). **파생 `startDate`·`endDate`는 인덱스 입력에서 뺀다.** `dropped` 관문의 날짜도 넣는다
   - `getEventsForDate(dateKey)`(`newtab.js:2129`) — `event.gates.some((g) => g.planned === dateKey)`로 바꾼다. 창 인덱스를 우회하는 구조는 그대로 둔다
 
   **하나만 고치면 그리드와 패널이 같은 날짜에 다른 답을 낸다**(DD32). 둘을 한 Task에 둔 이유가 그것이다 — 나누면 그 사이에 그 버그가 실재하는 커밋이 생긴다.
@@ -190,7 +192,9 @@ santa 루프가 8라운드를 돌고 캡에서 종료했다(`.claude/reviews/san
     **아래 셋은 출력 규칙까지 못박는다**(santa R5 B0·B1, R4 B2). 앞선 판은 "새 데이터를 읽되 기존 토큰을 쓴다" 까지만 적었는데, **그 셋이 전부 UI15 를 깨는 자리이고 셋 다 지금 코드가 반대로 하고 있다.** 읽으라고만 적으면 구현자마다 다른 화면이 나오고 Acceptance 가 어느 쪽이 옳은지 가리지 못한다.
 
     1. **패널 메타는 관문 날짜를 말한다.** `createTodoItem()`(`newtab.js:2914`)은 지금 `event.startDate !== event.endDate` 일 때 `formatShortDate(startDate) – formatShortDate(endDate)` 를 메타에 넣는다 — **연속 범위다.** 그대로 두면 월·수 관문 이벤트에서 **그리드는 화요일을 비우는데 패널은 화요일을 포함한 범위로 말한다.** 그리드와 패널이 같은 이벤트를 두고 다른 답을 내는 것이 DD32 가 막으려던 결함이고, 여기서는 UI15 의 헤드라인 결과가 패널에서 되살아난다. **바꾼다** — 살아 있는 관문(`status !== 'dropped'`)의 `planned` 를 오름차순으로 `formatShortDate` 해 `·` 로 잇는다. 관문이 하나면 메타에 날짜를 넣지 않는다(폭 없는 항목이 지금도 날짜 메타를 안 내는 것과 같은 규칙이다). **`.calendar-todo-meta` 스팬을 그대로 쓴다** — 새 요소도 새 클래스도 만들지 않는다
-    2. **칩의 마감 상태는 셀마다 정한다.** `createChips()`(`newtab.js:2830`)는 지금 `const dueState = this.getEventDueState(event)` 를 **이벤트당 한 번** 계산해 그 이벤트의 **모든 칩**에 같은 `is-due-*` 를 붙인다. DD31 이 `dropped` 관문의 날짜도 점유에 남기므로, 살아 있는 종단 관문이 지연인 이벤트에서는 **"안 하기로 한 날"의 칩에도 지연색이 붙는다** — 사용자는 범위축소를 지연으로 읽고, PRD 가 M2 에 요구한 "조기·지연·범위축소가 **구분되어** 남는다" 가 화면에서 다시 합쳐진다. **바꾼다** — 그 날짜의 관문이 **전부 `dropped`** 이면 그 칩에는 `is-due-*` 를 붙이지 않는다. 하나라도 살아 있으면 지금처럼 이벤트의 마감 상태를 붙인다. **`dropped` 를 어떻게 보이게 할지는 정하지 않는다** — 새 시각 언어는 M3 의 몫이고(UI4), 이 플랜이 하는 것은 **틀린 상태를 붙이지 않는 것**까지다
+    2. **칩의 마감 상태는 셀마다 정한다.** `createChips()`(`newtab.js:2830`)는 지금 `const dueState = this.getEventDueState(event)` 를 **이벤트당 한 번** 계산해 그 이벤트의 **모든 칩**에 같은 `is-due-*` 를 붙인다. DD31 이 `dropped` 관문의 날짜도 점유에 남기므로, 살아 있는 종단 관문이 지연인 이벤트에서는 **"안 하기로 한 날"의 칩에도 지연색이 붙는다** — 사용자는 범위축소를 지연으로 읽고, PRD 가 M2 에 요구한 "조기·지연·범위축소가 **구분되어** 남는다" 가 화면에서 다시 합쳐진다. **바꾼다** — 그 날짜의 관문이 **전부 `dropped`** 이면 그 칩에는 `is-due-*` 를 붙이지 않는다. 하나라도 살아 있으면 지금처럼 이벤트의 마감 상태를 붙인다. **`dropped` 를 어떻게 보이게 할지는 정하지 않는다** — 새 시각 언어는 M3 의 몫이고(UI4), 이 플랜이 하는 것은 **틀린 상태를 붙이지 않는 것**까지다.
+
+       **셀과 aria-label 도 같은 규칙을 탄다 — 칩만 고치면 절반만 고친 것이다**(santa R6 B0). `createDayCell()`(`newtab.js:2761`)은 칩과 **별도 경로로** `const dueState = this.getCellDueState(dayEvents)` 를 불러 셀에 `is-due-{dueState}` 를 붙이고 `DUE_STATE_LABELS[dueState]` 를 `aria-label` 에 넣는다. 그리고 `getCellDueState(dayEvents)`(`newtab.js:2640`)는 그 날의 이벤트마다 `getEventDueState(event)` 를 불러 가장 급한 것을 고르는데 — **날짜를 받지 않으므로 그 이벤트가 그 날에 왜 서 있는지(살아 있는 관문인지 `dropped` 인지)를 알 수 없다.** 칩에서 지운 지연색이 **셀 배경과 스크린리더 문구로 그대로 되돌아온다.** **바꾼다** — 서명을 `getCellDueState(dayEvents, dateKey)` 로 넓혀 날짜를 함께 받고, **그 날짜의 관문이 전부 `dropped` 인 이벤트는 집계에서 건너뛴다.** 호출부(`createDayCell()`)가 그 셀의 `dateKey` 를 넘긴다. 살아 있는 관문이 하나라도 있는 이벤트는 지금처럼 집계된다
     3. **프로젝트 이름의 자리를 실제 DOM 으로 적는다.** 앞선 판은 "기존 뱃지 자리에 이름만" 이라고 적었는데 **`createTodoItem()` 에는 프로젝트 뱃지 자리가 없다** — 제목 · 메타 · 메모 · 편집 · 삭제뿐이다(`newtab.js:2914` 이하). 없는 자리를 가리키는 지시는 구현자마다 다른 곳에 넣거나 새 뱃지를 만들거나 생략하게 만든다. **정한다** — 프로젝트 이름은 **`.calendar-todo-meta` 의 첫 항목**으로 들어간다(위 1 의 관문 날짜 앞). 새 요소도 새 클래스도 만들지 않는다. `projectId` 가 `null`(무소속)이면 **아무것도 넣지 않는다** — 무소속이 정상이고 그것을 따로 표시하지 않는 것이 UI8 이다
   - 겹침 경고를 만들지 않고 부하 표시도 하지 않는다(UI5 — M3의 몫)
 - **Mirror**: `newtab.js:2655` `render()`의 호출 순서와 `2757` `createDayCell()`의 aria-label 구성
@@ -206,7 +210,7 @@ santa 루프가 8라운드를 돌고 캡에서 종료했다(`.claude/reviews/san
 
   **고치는 것**: `Application.initialize()` — 온보딩 판정을 잇는다.
 
-  조건은 `this.projects.length === 0 && !this.projectsLoadFailed` **둘 다**이다(DD13). 이름 하나를 받아 프로젝트를 만들고, 건너뛰면 무소속으로 계속 쓴다. **건너뛴 경우에도 다시 뜨지 않는 플래그**를 저장한다.
+  조건은 **`this.calendarManager.projects.length === 0 && !this.calendarManager.projectsLoadFailed`** **둘 다**이다(DD13 — 소유자를 붙여 적는다. 이 자리의 `this` 는 `Application` 이고 그 클래스에는 두 필드가 **없다**, santa R6 B1). 이름 하나를 받아 프로젝트를 만들고, 건너뛰면 무소속으로 계속 쓴다. **건너뛴 경우에도 다시 뜨지 않는 플래그**를 저장한다.
 - **Mirror**: `newtab.js:459` `applyStorageNotice()` — 상시 표면을 늘리지 않고 필요할 때만 나타난다
 - **Validate**: 하네스 케이스 — 프로젝트가 없으면 뜨고, 건너뛰면 다시 뜨지 않고, **읽기 실패 상태(`projectsLoadFailed = true`)에서는 뜨지 않고 플래그도 타지 않으며**, 온보딩이 밴드 높이와 패널 스크롤을 바꾸지 않는다(`test/positioning.smoke.js:909` `runErrorBannerGeometryCases()`와 같은 형태)
 
@@ -322,10 +326,10 @@ SHA256C .claude/plans/work-calendar-m2b.rebaseline.sha256
 - [ ] `[기계+사람]` **`runCalendarOccupancyCases()`가 존재하고(기계) 단언 다섯이 통과한다(사람)** — 점유가 관문 집합과 같고, 관문에 없던 날을 점유하지 않고, 칩이 `min(버킷 길이, MAX_CHIPS_PER_CELL)`와 같고, 4일 폭 입력에서 점유가 둘로 줄고, **같은 날 `dev`·`review` 관문을 가진 이벤트 하나의 버킷 길이가 1이다**(DD31의 이벤트별 접기). **마지막 항이 빠지면 접기를 빼먹은 구현이 최종 게이트를 통과하고, 그리드에는 칩 둘 · 패널에는 이벤트 하나가 남는다** — DD32가 막으려는 불일치가 그대로 출하된다 (santa R1 B3)
 - [ ] `[사람]` **그리드와 패널이 같은 날짜에 같은 답을 낸다** — `today-3`·`today` 관문 이벤트에서 `today-1` 셀이 비어 있고 그 날짜의 `getEventsForDate()`도 빈 배열이다 (DD32). **그리고 같은 날 `dev`·`review` 관문을 가진 이벤트 하나에서 `today` 셀의 칩이 하나이고 `getEventsForDate(today)`도 길이 1이다** — 앞의 것은 "둘 다 비었나"를, 이것은 "둘 다 하나인가"를 묻는다. 접기 누락은 앞의 것을 통과하고 이것만 죽인다 (santa R1 B3)
 - [ ] `[사람]` **`dropped` 관문이 점유에는 남는다** — 안 하기로 한 관문의 셀이 여전히 차 있다. 계획은 남는다 (DD31)
-- [ ] `[사람]` **`dropped` 관문의 셀에 지연색이 붙지 않는다** — 살아 있는 종단 관문이 지난 날짜(지연)이고 그보다 늦은 관문이 `dropped` 인 이벤트를 만든 뒤, 그 `dropped` 날짜의 칩에 `is-due-overdue` 가 **없는지** 확인한다. 붙으면 범위축소가 지연으로 읽혀 PRD 가 요구한 구분이 화면에서 합쳐진다 (Task 2 규칙 2, santa R5 B1)
+- [ ] `[사람]` **`dropped` 관문의 날짜에 지연색이 붙지 않는다 — 칩 · 셀 · `aria-label` 셋 다** — 살아 있는 종단 관문이 지난 날짜(지연)이고 그보다 늦은 관문이 `dropped` 인 이벤트를 만든 뒤, 그 `dropped` 날짜에서 (a) 칩에 `is-due-overdue` 가 없고, (b) **셀(`.calendar-day`)에도 `is-due-overdue` 가 없으며**, (c) **셀의 `aria-label` 에 지연 문구가 없는지** 확인한다. **칩만 보면 절반만 본 것이다** — 셀 클래스와 `aria-label` 은 `getCellDueState()` 라는 별도 경로로 붙으므로 칩을 고쳐도 그대로 남고, 눈으로는 셀 배경이 스크린리더로는 문구가 여전히 범위축소를 지연이라고 말한다 (Task 2 규칙 2, santa R5 B1 · R6 B0)
 - [ ] `[사람]` **패널이 관문 날짜를 말한다** — `today-3`·`today` 관문 이벤트를 열어 패널 메타가 `today-3 – today` **연속 범위가 아니라** 두 관문 날짜를 열거하는지 확인한다. 범위로 나오면 그리드는 `today-1` 을 비우는데 패널은 포함해 말하게 되어 DD32 가 막으려던 불일치가 패널 쪽에 남는다 (Task 2 규칙 1, santa R5 B0)
 - [ ] `[사람]` **불연속 배치가 눈에 보인다** — `today-3`·`today` 관문 이벤트를 만들고 그리드에서 `today-2`·`today-1` 셀이 **비어 있는지** 눈으로 확인한다. 이것이 M2의 헤드라인 결과물이다 (UI15)
-- [ ] `[사람]` **UI4 판정은 사람이 눈으로 본다** — 달력 표면을 전반부 종료 상태와 나란히 놓고, 프로젝트가 **기존 뱃지 자리에 이름만**으로, 관문이 **기존 칩 형태 그대로** 나오는지 확인한다. 새 색·새 아이콘·새 칩 모양·새 상시 표면이 하나라도 생겼으면 실패다. **기계로 판정할 수단이 없다** — `snapshot()`은 기하만 담으므로 이 항목의 대역이 될 수 없다
+- [ ] `[사람]` **UI4 판정은 사람이 눈으로 본다** — 달력 표면을 전반부 종료 상태와 나란히 놓고, 프로젝트 이름이 **`.calendar-todo-meta` 의 첫 항목**으로(Task 2 규칙 3 — `createTodoItem()` 에 프로젝트 뱃지 자리는 **없다**), 관문이 **기존 칩 형태 그대로** 나오는지 확인한다. **"기존 뱃지 자리" 라는 옛 문구를 판정 기준으로 쓰지 않는다**(santa R6 B2) — 그 자리가 실재하지 않아 Task 2 가 실제 DOM 으로 바꿔 적었는데 이 항목만 옛 문구로 남아 있었고, 그러면 Task 2 를 따른 구현이 여기서 실패로 읽히고 없는 자리를 만들어 낸 구현이 통과한다. 새 색·새 아이콘·새 칩 모양·새 상시 표면이 하나라도 생겼으면 실패다. **기계로 판정할 수단이 없다** — `snapshot()`은 기하만 담으므로 이 항목의 대역이 될 수 없다
 - [ ] `[사람]` **읽기 실패를 첫 실행으로 오인하지 않는다** — `projectsLoadFailed`가 참인 상태에서 온보딩이 뜨지 않고 한 번뿐인 플래그가 타지 않는다 (DD13)
 - [ ] `[사람]` **온보딩이 레이아웃을 바꾸지 않는다** — 밴드 높이와 패널 스크롤이 안 움직인다
 - [ ] `[사람]` **재베이스라인 전에 (d)의 세 값을 눈으로 맞췄다** — `range/01-month-boundary`의 `januaryChipDates`·`februaryChipDates`·`distinctDates`가 Task 4가 적어 둔 기대값과 같다. 다른 기존 케이스에서 값이 움직였으면 재베이스라인하지 않고 원인을 찾는다
