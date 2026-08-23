@@ -131,14 +131,14 @@ santa 루프가 8라운드를 돌고 캡에서 종료했다(`.claude/reviews/san
 
   **만드는 것 — 셋이다.**
   1. `work-calendar-m2b.baseline.json` — 하네스의 `베이스라인 내보내기` 버튼으로 내려받아 저장소 루트에 둔다. **버튼과 그 리스너는 전반부 Task 0이 이미 만들었다**(`test/positioning.smoke.html`의 마크업 + `test/positioning.smoke.js`의 `addEventListener`) — 이 플랜은 그것을 쓰기만 한다
-  2. `.claude/plans/work-calendar-m2b.baseline.sha256` — `shasum -a 256 test/positioning.smoke.js work-calendar-m2b.baseline.json > .claude/plans/work-calendar-m2b.baseline.sha256`
+  2. `.claude/plans/work-calendar-m2b.baseline.sha256` — `shasum -a 256 test/positioning.smoke.js work-calendar-m2b.baseline.json > .claude/plans/work-calendar-m2b.baseline.sha256` — **`shasum` 이 없으면 `sha256sum` 에 같은 인자를 준다.** 출력 형식이 같아 `-c` 가 서로 읽는다 (santa R2 B0)
   3. 전반부가 끝난 상태에서 **단언 실패 0건**임을 먼저 확인한다. 실패가 있는 채로 뜬 베이스라인은 회귀를 기준으로 굳힌다
 
   **고치는 것**: 없다.
 
   > **절차 규칙이고 기계적 강제가 없다.** 이 저장소에는 CI도 커밋 훅도 없으므로 Task 0을 건너뛰고 Task 1을 커밋하는 것을 막을 수단이 없다. 그 사실을 숨기지 않고 적는다 — 강제가 아니라 규율이다. 헤드리스 러너 도입이 유일한 실질 수리이며 이 마일스톤 밖이다(백로그 `id=m2-headless-runner`).
 - **Mirror**: 전반부 Task 0 — 파괴적 단계 앞에 베이스라인을 먼저 세운다
-- **Validate**: `shasum -a 256 -c .claude/plans/work-calendar-m2b.baseline.sha256`이 그 자리에서 통과한다. 이후로는 기록이지 게이트가 아니다
+- **Validate**: `shasum -a 256 -c .claude/plans/work-calendar-m2b.baseline.sha256`(또는 `sha256sum -c` — santa R2 B0)이 그 자리에서 통과한다. 이후로는 기록이지 게이트가 아니다
 
 ### Task 1: 점유 전환 (첫 비가역 지점)
 
@@ -204,7 +204,7 @@ santa 루프가 8라운드를 돌고 캡에서 종료했다(`.claude/reviews/san
 
 - **Action**: Task 1·3이 만든 케이스 **둘**(`runCalendarOccupancyCases` · `runCalendarOnboardingCases`)을 `runAll()` 순서에 넣는다.
 
-  재베이스라인 뒤 **`베이스라인 내보내기`를 다시 눌러 파일을 새로 받고** `work-calendar-m2b.baseline.json`을 덮어쓴 다음 뒤쪽 앵커를 뜬다 — `shasum -a 256 test/positioning.smoke.js work-calendar-m2b.baseline.json > .claude/plans/work-calendar-m2b.rebaseline.sha256`. 순서가 계약이다: (1) 재베이스라인 → (2) 재내보내기·덮어쓰기 → (3) 해시 생성. 재내보내기를 빠뜨리면 해시가 "옛 파일이 안 바뀌었다"만 증명하고, 비교에 실제로 쓰이는 베이스라인과 커밋된 파일이 같은지는 증명하지 않는다.
+  재베이스라인 뒤 **`베이스라인 내보내기`를 다시 눌러 파일을 새로 받고** `work-calendar-m2b.baseline.json`을 덮어쓴 다음 뒤쪽 앵커를 뜬다 — `shasum -a 256 test/positioning.smoke.js work-calendar-m2b.baseline.json > .claude/plans/work-calendar-m2b.rebaseline.sha256` (`shasum` 이 없으면 `sha256sum` 으로 같은 인자를 준다 — santa R2 B0). 순서가 계약이다: (1) 재베이스라인 → (2) 재내보내기·덮어쓰기 → (3) 해시 생성. 재내보내기를 빠뜨리면 해시가 "옛 파일이 안 바뀌었다"만 증명하고, 비교에 실제로 쓰이는 베이스라인과 커밋된 파일이 같은지는 증명하지 않는다.
 - **Mirror**: `test/positioning.smoke.js:975` `runAll()`의 실행 순서와 저장소 복원 규약
 - **Validate**: 단언 실패 0건. 시계 경로 diff 0.
 
@@ -227,7 +227,7 @@ santa 루프가 8라운드를 돌고 캡에서 종료했다(`.claude/reviews/san
 
 ## Validation
 
-**셸을 못박는다.** 아래는 POSIX sh/bash 문법이다. 이 저장소의 기본 셸은 PowerShell이고 거기서는 돌지 않는다 — Git Bash에서 돌린다. `shasum`이 없으면 `sha256sum`으로 바꾼다.
+**셸을 못박는다.** 아래는 POSIX sh/bash 문법이다. 이 저장소의 기본 셸은 PowerShell이고 거기서는 돌지 않는다 — Git Bash에서 돌린다. `shasum`이 없으면 `sha256sum`을 쓴다 — **3번 블록이 그 선택을 스스로 하므로 손으로 바꿀 필요가 없고**, Task 0·4 의 생성 명령에는 두 형태를 함께 적어 두었다 (santa R2 B0).
 
 **승인 시점에 돌 수 있는 것은 1번뿐이다.** 2·3번은 구현이 있어야 돌고, 4번은 브라우저가 있어야 돈다.
 
@@ -260,7 +260,17 @@ F=$(grep -c "DD31-FIXTURE" test/positioning.smoke.js)
 # 3. 앵커 — 끝 상태 게이트는 **뒤쪽**이다.
 #    Task 0 의 baseline.sha256 은 구현 전 기록이고, Task 1~4 가 하네스를 고치므로
 #    그것으로 끝 상태를 검사하면 설계상 반드시 깨진다.
-shasum -a 256 -c .claude/plans/work-calendar-m2b.rebaseline.sha256
+#    해시 도구를 여기서 한 번 정하고 그것만 쓴다 (santa R2 B0 — 위 머리말이 "shasum 이
+#    없으면 sha256sum 으로 바꾼다" 고 적어 놓고 실제 명령은 shasum 에 고정돼 있었다.
+#    sha256sum 만 있는 환경에서는 구현이 옳아도 이 줄에서 죽는다). 출력 형식이 같다.
+if command -v shasum >/dev/null 2>&1; then
+  SHA256C() { shasum -a 256 -c "$@"; }
+elif command -v sha256sum >/dev/null 2>&1; then
+  SHA256C() { sha256sum -c "$@"; }
+else
+  echo "ANCHOR: shasum 도 sha256sum 도 없다 — 앵커 검사를 돌릴 수 없다"; exit 1
+fi
+SHA256C .claude/plans/work-calendar-m2b.rebaseline.sha256
 
 # 4. 스모크 하네스 — 브라우저에서 연다 (자동화 불가)
 #    빈 프로필/시크릿 창에서 test/positioning.smoke.html 을 열고 Run → 단언 실패 0건,

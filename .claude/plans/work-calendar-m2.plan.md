@@ -11,7 +11,9 @@
 
 **M2는 두 플랜으로 갈렸고 이것이 전반부다.** PRD의 M2 결과문에 동사가 둘 있고 그 둘이 서로 다른 일이기 때문이다 — 작업이 업무 모양을 **담는다**(데이터)와 불연속 배치가 그대로 **표현된다**(화면). 이 플랜은 앞의 것만 한다. 뒤의 것은 `work-calendar-m2b.plan.md`가 하고, **PRD의 M2 행은 둘 다 끝나야 `complete`가 된다.**
 
-**그래서 이 플랜에서 화면은 달라지지 않는다.** 저장 구조가 관문으로 바뀌어도 렌더 경로는 파생 `startDate`·`endDate`를 그대로 읽으므로, 마이그레이션 전후로 사용자가 보는 것이 **같아야 한다.** 그 "같아야 한다"가 이 플랜의 등가 단언이고 **예외가 없다** — 점유가 달라지는 것은 후반부의 일이다. 바뀌는 것 중 화면에 닿는 유일한 자리는 마감 **의미**(`getEventDueState()`가 종단 관문을 읽는 것)인데, 마이그레이션 직후에는 그 값이 파생 `endDate`와 같으므로 결과도 같다.
+**그래서 이 플랜에서 기존 달력 표면은 달라지지 않는다 — "기존"이 그 문장의 전부다**(santa R2 B2). 저장 구조가 관문으로 바뀌어도 렌더 경로는 파생 `startDate`·`endDate`를 그대로 읽으므로, **그리드의 점유 · 기하 · 마감 의미** 세 축이 마이그레이션 전후로 같아야 한다. 그 "같아야 한다"가 이 플랜의 등가 단언이고 **그 세 축에는 예외가 없다** — 점유가 달라지는 것은 후반부의 일이다. 세 축에 닿는 유일한 변경은 마감 **의미**(`getEventDueState()`가 종단 관문을 읽는 것)인데, 마이그레이션 직후에는 그 값이 파생 `endDate`와 같으므로 결과도 같다.
+
+**그러나 이 플랜은 새 표면을 더한다. 그것을 "화면이 안 바뀐다"에 접어 넣지 않는다.** Task 4 의 **관문 편집기**와 **프로젝트 선택기**가 상세 모달 안에 새로 서고 `newtab.html`·`newtab.css` 가 그만큼 바뀐다. 이 플랜의 `## Design Critique` R1 이 이미 "**Task 4 의 관문 편집기가 렌더 표면이다**" 라고 적어 두었는데 **앞선 판의 이 문단이 그것을 부정하고 있었다** — 기존 모달 **안**에 들어간다는 것은 UI4 를 지키는 이유이지 표면이 아니라는 뜻이 아니다. 등가 단언은 그 새 표면을 보지 못한다: 기하 diff 는 닫힌 모달을 담지 않고 도메인 투영은 마감 의미와 점유만 담는다. **그러므로 새 표면의 회귀는 등가 게이트가 아니라 아래 Acceptance 의 `[사람]` 판정이 진다.** 이 문단이 없으면 "사용자가 보는 것이 같다" 를 읽은 심사자가 게이트 밖에 남은 표면이 있다는 사실을 모른 채 통과시킨다.
 
 이 마일스톤은 디자인 수렴 대상이 아니다(PRD: "M1과 M3은 impeccable 루프 대상이고 M2는 데이터 작업이라 그렇지 않다").
 
@@ -502,8 +504,10 @@ santa R0에서 사용자가 "M2가 표현한다"를 정한 그 결정이고, 여
 
 **이 플랜이 DD31을 지지 않으면서도 참인 문장 하나를 남긴다** — `rebuildIndex()`와
 `getEventsForDate()`는 이 플랜에서 **건드리지 않는다.** 그래서 마이그레이션 전후로
-점유가 같고, 등가 단언에 예외가 없다. 후반부가 그 둘을 바꿀 때 비로소 화면이
-달라지며, 그 변화의 열거는 거기서 한다.
+점유가 같고, **그리드 세 축(점유·기하·마감 의미)의** 등가 단언에 예외가 없다. 후반부가
+그 둘을 바꿀 때 비로소 **그리드가** 달라지며, 그 변화의 열거는 거기서 한다.
+(Task 4 가 모달 안에 더하는 관문 편집기·프로젝트 선택기는 이 문장이 말하는 그리드
+세 축 밖이고, Acceptance 의 `[사람]` 항목이 진다 — santa R2 B2.)
 
 
 ## 이 플랜이 다루지 않는 것 — 화면 표현의 분리
@@ -578,7 +582,7 @@ Task 7 허용 diff·Acceptance 세 자리를 동시에 흔들었고 그 셋이 �
      "승인 시점 구속" 과 같은 종류의 한계이고 이 저장소의 수단으로 닫히지 않는다. 다만
      닫히지 않는 것과 **비어 있는 것**은 다르다 — 지금까지는 비어 있었다
   3. `work-calendar-m2.baseline.json` — 위 버튼으로 내려받아 저장소 루트에 둔다
-  4. `.claude/plans/work-calendar-m2.baseline.sha256` — `shasum -a 256 test/positioning.smoke.js work-calendar-m2.baseline.json > .claude/plans/work-calendar-m2.baseline.sha256`
+  4. `.claude/plans/work-calendar-m2.baseline.sha256` — `shasum -a 256 test/positioning.smoke.js work-calendar-m2.baseline.json > .claude/plans/work-calendar-m2.baseline.sha256`. **`shasum` 이 없으면 `sha256sum` 에 같은 인자를 준다** — 출력 형식이 같아 어느 쪽으로 떠도 Validation 3 의 `-c` 가 읽는다 (santa R2 B0)
 
   **고치는 것**: `test/positioning.smoke.js` — **버튼 마크업은 `.html`에 가지만 리스너는 여기 붙는다**(santa R3 B1). 확장 오리진 페이지라 인라인 스크립트가 CSP에 막히고, 기존 버튼들도 전부 이 파일에서 `document.getElementById('runBaseline')?.addEventListener(...)` 형태로 붙는다(`test/positioning.smoke.js:1119` 부근). 앞선 판은 "만드는 것"에 `.html` 하나만 적고 "고치는 것: 없다"라고 했는데, **그대로 따르면 버튼은 생기고 리스너가 없어 눌러도 아무 파일도 안 받아진다.** 그러면 Task 0이 `work-calendar-m2.baseline.json`을 만들지 못하고, 그것을 요구하는 Task 7과 Validation 3의 앵커 사슬이 시작조차 못 한다.
 
@@ -591,7 +595,7 @@ Task 7 허용 diff·Acceptance 세 자리를 동시에 흔들었고 그 셋이 �
 - **Validate**: 단언 실패 0건이고 베이스라인이 `__smokeBaseline`에 저장됐다.
   - **베이스라인을 뜨는 저장 상태를 고정한다.** 하네스 케이스는 저마다 `loadApp()`에 자기 저장 상태를 넘기므로(`test/positioning.smoke.js:265`·`495`) "현재 스냅샷"에 모호함이 없다 — 베이스라인은 `runAll()`이 도는 그 상태들의 집합이다. 사람이 브라우저 저장소를 미리 채워 두고 뜨면 안 된다. 확장을 실제로 쓰던 프로필에서 열지 말고 **빈 프로필이나 시크릿 창에서 `test/positioning.smoke.html`을 연다.**
   - **베이스라인과 하네스 코드의 해시를 함께 적는다**(R0 invariant F6 — plan 해시는 하네스도 베이스라인도 고정하지 못한다). `sha256`을 둘 떠서 PRD의 게이트 실행 기록 줄에 남긴다: **먼저 베이스라인을 파일로 꺼낼 수단을 만든다.** R1 흡수에서 나는 "Copy Baseline으로 받은 JSON"이라고 적었는데 **그런 것은 없다** — 베이스라인은 `chrome.storage.local`의 `__smokeBaseline`에만 있고(`test/positioning.smoke.js:14`·`1123`), `positioning.smoke.html`의 버튼은 셋뿐이다(`베이스라인 캡처`·`비교 실행`·`베이스라인 삭제`, `102-104`). 파일이 없으니 `shasum -c`는 "no such file"로 죽는다 — **실행될 수 없는 검사를 판정으로 적어 둔 것이고, R0가 막은 결함과 같은 종류다**(R2 architect F1).
-  그래서 Task 0이 하네스에 버튼 하나를 더한다 — `베이스라인 내보내기`: `chrome.storage.local.get([BASELINE_KEY])`로 읽어 `JSON.stringify(v, null, 2)`를 `Blob`으로 내리는 열 줄 남짓이다. 내려받은 `work-calendar-m2.baseline.json`을 저장소에 두고, 그 파일과 `test/positioning.smoke.js` 둘의 해시를 **`shasum -c`가 읽는 표준 형식**(`<64자 hex><공백 두 개><경로>` 한 줄씩, R2 invariant F2가 형식 미지정을 지적했다)으로 `.claude/plans/work-calendar-m2.baseline.sha256`에 남긴다. 생성은 `shasum -a 256 test/positioning.smoke.js work-calendar-m2.baseline.json > .claude/plans/work-calendar-m2.baseline.sha256` 한 줄이다.
+  그래서 Task 0이 하네스에 버튼 하나를 더한다 — `베이스라인 내보내기`: `chrome.storage.local.get([BASELINE_KEY])`로 읽어 `JSON.stringify(v, null, 2)`를 `Blob`으로 내리는 열 줄 남짓이다. 내려받은 `work-calendar-m2.baseline.json`을 저장소에 두고, 그 파일과 `test/positioning.smoke.js` 둘의 해시를 **`shasum -c`가 읽는 표준 형식**(`<64자 hex><공백 두 개><경로>` 한 줄씩, R2 invariant F2가 형식 미지정을 지적했다)으로 `.claude/plans/work-calendar-m2.baseline.sha256`에 남긴다. 생성은 `shasum -a 256 test/positioning.smoke.js work-calendar-m2.baseline.json > .claude/plans/work-calendar-m2.baseline.sha256` 한 줄이다(`shasum` 이 없으면 `sha256sum` 에 같은 인자 — santa R2 B0).
   **이 앵커가 사는 것과 사지 못하는 것을 갈라 적는다**(R2 invariant F7). 베이스라인은 Task 0에서, 즉 **플랜 승인 뒤에** 만들어지므로 plan 해시가 그것을 구속하지 못한다 — 앵커가 막는 것은 "승인된 베이스라인으로 시작했는가"가 아니라 **"Task 0과 Task 8 사이에 베이스라인이나 하네스가 소리 없이 바뀌었는가"**이며, 그것이 재베이스라인 판정을 무의미하게 만드는 실제 경로다. 그 이상을 주장하지 않는다. 이 줄이 없으면 Task 8의 재베이스라인이 무엇 대비 변화인지 사후에 확인할 수 없다.
   - **실패가 있으면 Task 1을 시작하지 않는다 — 원인을 먼저 찾는다.** R0 invariant F1 이래로
     이것은 **절차 규칙이고 기계적 강제가 없다**고 적혀 있었다. L2 패널이 그 자리를 CRITICAL
@@ -961,7 +965,11 @@ R11 architect HIGH 둘): 아래 넷이 곧 **`normalizeGates(inputGates)` 의 �
      이 입력은 **마이그레이션으로 만들어지지 않는다.** `uniqueDates` 가 같은 날짜를 하나로 접으므로 v3 범위에서는 같은 날 관문 둘이 나올 수 없고, 그래서 **v4 이벤트로 직접 세운다** — `gates: [{kind: 'dev', planned: today-1, ...}, {kind: 'review', planned: today-1, ...}]`. v3 대응물이 없으므로 **위 등가 단언(`expectedByV3Rule`)의 입력 집합에는 넣지 않는다**; 넣으면 참조 구현이 답할 수 없는 것을 묻게 된다. 표식은 똑같이 `DD3-FIXTURE` 를 달아 하한 검사가 함께 세게 한다.
 
      단언은 셋째 단언으로 따로 선다 — `assert(getEventDueState(dualGateEvent) === 'overdue', 'DD25 동점 면제가 깨졌다')`, 그리고 **두 관문의 순서를 뒤집은 같은 이벤트가 같은 답을 내는지**(`gates` 를 `reverse()` 한 사본으로 한 번 더). 뒤집기가 이 단언의 전부다: 순서를 바꿔 답이 달라지면 판정이 `planned` 말고 무언가를 함께 읽고 있다는 뜻이고, 그 순간 DD25 의 면제 근거가 사라진다. **한 줄로 잡히는 것을 문단으로 지키고 있었다.**
-    1. `assert(JSON.stringify(after.meaning) === JSON.stringify(expectedByV3Rule(fixtures)), 'v4 마이그레이션이 마감 의미를 바꿨다')` — `meaning`은 이벤트별 `getEventDueState()` 결과와 `.calendar-summary`의 `textContent`(없으면 `null`)다
+    1. `assert(JSON.stringify(after.meaning) === JSON.stringify(expectedByV3Rule(fixtures)), 'v4 마이그레이션이 마감 의미를 바꿨다')` — **`meaning`은 이벤트별 `getEventDueState()` 결과 하나다.** 앞선 판은 여기에 `.calendar-summary`의 `textContent`를 함께 넣어 두었는데, **참조 구현은 그것에 답할 수 없다**(santa R2 B1). `expectedByV3Rule`은 마감 규칙 세 줄이라 배너 문구를 만들어 내지 못하고, 그러면 기대값이 미정의로 남아 구현자마다 다른 오라클을 만든다 — 한쪽은 due-state 배열만 돌려주게 만들어 배너 회귀를 통과시키고, 다른 쪽은 배너 문구를 임의 규칙으로 계산해 옳은 코드를 오탐한다. **핵심 게이트가 구현자에 따라 달라지는 것이 그 자체로 결함이다.**
+
+       **`.calendar-summary`의 `textContent`(없으면 `null`)는 투영에 계속 담되 단언하지 않는다 — 진단용이다.** 근거: `renderSummary()`(`newtab.js:2673-2700`)는 `this.events`를 돌며 **`getEventDueState(event)` 하나만** 읽어 `'today'`·`'overdue'`를 세고, 셀 것이 없으면 노드를 지운다. 다른 상태를 읽지 않는다. 그리고 **이 플랜은 `renderSummary()`를 고치지 않는다.** 따라서 배너는 마감 상태 다중집합의 순수 함수이고, 위 단언이 그 다중집합의 동일성을 이미 보증하므로 **배너 동일성은 따라 나온다.** 별도로 단언하려면 하네스에 배너 포맷터를 다시 구현해야 하는데 그것은 DD11 이 금지한 두 번째 판정자이고, 참조 구현을 다섯 줄 안에 두라는 이 절의 제약도 깬다.
+
+       **그 근거가 성립하는 조건을 함께 적는다** — `renderSummary()`가 `getEventDueState()` 말고 다른 상태를 읽게 되는 날 이 추론은 무너지고 배너는 자기 단언을 가져야 한다. 아래 Acceptance 에 그것을 사람이 확인하는 항목을 두었다
     2. `assert(setEq(bucketKeysAfter, bucketKeysBefore), 'v4 마이그레이션이 점유를 바꿨다')` — **이 플랜은 점유를 건드리지 않으므로 점유도 같아야 한다.** 후반부와 정반대 방향의 단언이고, 둘이 한 문서에 있었을 때 서로를 부정하던 것이 갈라지면서 각자 참이 된다. 실수로 `rebuildIndex()`를 함께 고치면 여기서 죽는다
 
     투영은 `collector.add('v4-equivalence/01-meaning'|'02-occupancy', …)`로 남겨 어긋났을 때 무엇이 달라졌는지 읽을 수 있게 한다.
@@ -983,7 +991,7 @@ R11 architect HIGH 둘): 아래 넷이 곧 **`normalizeGates(inputGates)` 의 �
 
 ### Task 7: 하네스 확충과 재베이스라인
 - **Action**: Task 2~5가 만든 케이스 **넷**을 `runAll()` 순서에 넣는다. **무엇을 잇는지 세어 적는다**(R8 test F4 — "Task 2~5에서 더한 케이스"라고만 적으면 무엇이 더해졌는지가 다시 판단의 문제가 된다): 기존 `runCalendarV3MigrationCases` 바로 뒤에 `runCalendarV4MigrationCases`, 그 뒤에 `runCalendarV4EquivalenceCases`(등가 판정은 마이그레이션이 검증된 다음에만 의미가 있다), 이어서 `runCalendarProjectCases` · `runCalendarGateCases`. **`runCalendarOnboardingCases`는 후반부가 만들고 후반부가 잇는다.** 시계 경로와 **달력 경로 둘 다 diff 0**을 확인한다 — 이 플랜은 화면을 바꾸지 않으므로 달력 쪽을 재베이스라인할 이유가 없고, diff가 났다면 점유나 렌더를 실수로 함께 고친 것이다. 단언 실패가 0건인지 마지막에 다시 본다.
-  **재베이스라인 직후, `베이스라인 내보내기`를 다시 눌러 파일을 새로 받은 뒤** 뒤쪽 앵커를 뜬다(santa R2 B3 · **santa R3 B3이 그 답의 구멍을 잡았다**) — `shasum -a 256 test/positioning.smoke.js work-calendar-m2.baseline.json > .claude/plans/work-calendar-m2.rebaseline.sha256`.
+  **재베이스라인 직후, `베이스라인 내보내기`를 다시 눌러 파일을 새로 받은 뒤** 뒤쪽 앵커를 뜬다(santa R2 B3 · **santa R3 B3이 그 답의 구멍을 잡았다**) — `shasum -a 256 test/positioning.smoke.js work-calendar-m2.baseline.json > .claude/plans/work-calendar-m2.rebaseline.sha256` (`shasum` 이 없으면 `sha256sum` 으로 같은 인자를 준다 — santa R2 B0).
 
   **재내보내기가 빠지면 앵커가 아무것도 묶지 못한다.** 재베이스라인은 하네스를 다시 돌려 새 스냅샷을 `chrome.storage.local`의 `__smokeBaseline`에 넣는 동작이고(`test/positioning.smoke.js:1122` 부근), 저장소 루트의 `work-calendar-m2.baseline.json`은 **Task 0이 한 번 내려받아 둔 파일일 뿐 그것과 연결돼 있지 않다.** 재내보내기 없이 해시를 뜨면 "Task 0의 옛 파일이 그동안 안 바뀌었다"만 증명하고, 정작 **비교에 실제로 쓰이는 베이스라인과 커밋된 파일이 같은가**는 증명하지 않는다. 순서를 못박는다 — (1) 재베이스라인, (2) `베이스라인 내보내기` 재클릭 후 받은 파일로 `work-calendar-m2.baseline.json` 덮어쓰기, (3) 그 파일과 하네스로 `rebaseline.sha256` 생성. Task 0의 `baseline.sha256`은 **구현 전 기록이라 여기서 갱신하지 않고 그대로 둔다**; 둘의 차이가 이 마일스톤이 하네스와 베이스라인을 어떻게 움직였는지의 감사 기록이다. 끝 상태 게이트(Validation 3)가 읽는 것은 뒤쪽이다.
 - **Mirror**: `test/positioning.smoke.js:975` `runAll()`의 실행 순서와 저장소 복원 규약
@@ -1067,7 +1075,20 @@ node --check newtab.js
 #     하나씩 조용히 실패하며 지나가는 모양이 된다. 못을 실행문으로 바꾼다 — 도구가
 #     하나라도 없으면 **여기서 죽고** 그 아래는 시작하지 않는다.
 for t in grep sed wc; do command -v "$t" >/dev/null 2>&1 || { echo "SHELL: $t 이 없다 — 이 블록은 POSIX sh/bash 전용이다. Git Bash 에서 다시 돌려라"; exit 1; }; done
-command -v shasum >/dev/null 2>&1 || command -v sha256sum >/dev/null 2>&1 || { echo "SHELL: shasum 도 sha256sum 도 없다 — 3번 앵커 검사를 돌릴 수 없다"; exit 1; }
+#    **해시 도구를 여기서 한 번 정하고 아래 3번은 그것만 쓴다**(santa R2 B0). 앞선 판은
+#    "shasum 이 없으면 sha256sum 으로 바꾼다" 를 산문으로만 적고 실제 명령은 `shasum` 에
+#    고정해 두었다 — sha256sum 만 있는 환경에서는 이 preflight 가 "둘 중 하나면 된다" 로
+#    통과시킨 뒤 3번이 곧바로 죽는다. **구현이 옳아도 게시된 절차를 통과할 수 없어**
+#    마일스톤을 닫지 못한다. 둘의 출력 형식은 같으므로 `-c` 도 서로 읽는다.
+if command -v shasum >/dev/null 2>&1; then
+  SHA256()  { shasum -a 256 "$@"; }
+  SHA256C() { shasum -a 256 -c "$@"; }
+elif command -v sha256sum >/dev/null 2>&1; then
+  SHA256()  { sha256sum "$@"; }
+  SHA256C() { sha256sum -c "$@"; }
+else
+  echo "SHELL: shasum 도 sha256sum 도 없다 — 3번 앵커 검사를 돌릴 수 없다"; exit 1
+fi
 printf x | grep -qE "^[x]$" || { echo "SHELL: grep -E 가 POSIX 문자 클래스를 처리하지 못한다"; exit 1; }
 
 # 2. 약속 이행 검사 — 이 플랜이 약속한 함수가 실제로 코드에 있는가 (DD23)
@@ -1088,10 +1109,15 @@ decl() { printf '(^(function|async[[:space:]]+function|const|let|var)[[:space:]]
 for fn in runCalendarV4MigrationCases runCalendarV4EquivalenceCases runCalendarProjectCases runCalendarGateCases spyOn; do
   grep -qE "$(decl $fn)" test/positioning.smoke.js || { echo "MISSING: $fn"; exit 1; }
 done
-#    newtab.js 함수 열하나 — createCalendarGate 가 R4 에서 빠져 있었다 (security F1 · test F3).
-#    (santa R1 자체 발견: 이 주석이 "일곱"이라 적혀 있었는데 아래 목록은 열하나다.
-#     Acceptance 쪽은 처음부터 열하나로 맞아 있었으므로 틀린 것은 이 주석이었다.)
-for fn in promoteEventsToV3 promoteEventsToV4 deriveEventRange createCalendarGate createCalendarProject loadProjects persistProjects reconcileProjectRefs addGate updateGate removeGate; do
+#    newtab.js 함수 열둘 — createCalendarGate 가 R4 에서 빠져 있었다 (security F1 · test F3).
+#    (santa R1 자체 발견: 이 주석이 "일곱"이라 적혀 있었는데 아래 목록은 열하나였다.)
+#    **santa R2 A1: normalizeGates 가 이 루프에서 빠져 있었다.** 도입부(26-30행)는
+#    열둘을 만들라 지시하고 Task 1 item 4 가 그것을 만드는데, 약속 이행 검사는
+#    열하나만 돌았다 — 하필 DD36 이 DD25 접기의 **유일한 집행 지점**으로 지목한
+#    함수다. 2b 의 호출 자리 검사는 네 함수 본문에 `normalizeGates(` 라는 **호출**이
+#    있는지만 보므로, 선언을 통째로 빠뜨려도 통과하고 실패는 브라우저 런타임에서야
+#    난다. 존재 검사가 그것을 잡는 자리다.
+for fn in promoteEventsToV3 promoteEventsToV4 deriveEventRange createCalendarGate createCalendarProject loadProjects persistProjects reconcileProjectRefs normalizeGates addGate updateGate removeGate; do
   grep -qE "$(decl $fn)" newtab.js || { echo "MISSING: $fn"; exit 1; }
 done
 #    배선 검사 — 다섯 **전부**를 `runAll()` **본문 안에서** 찾는다 (santa R1 B4).
@@ -1270,7 +1296,7 @@ W=$(grep -c "DD3-FIXTURE-WIDTH" test/positioning.smoke.js)
 #    Task 0 이 봉투에 담은 수를 여기서 읽는다. 봉투가 아닌 옛 형식(맨 baseline)이면 meta 가
 #    없으므로 grep 이 실패해 **죽는다** — 조용히 통과하지 않는다.
 grep -qE '"assertFailures"[[:space:]]*:[[:space:]]*0' work-calendar-m2.baseline.json || { echo "baseline.json 이 단언 실패 0건을 증명하지 못한다 — 봉투에 meta.assertFailures 가 없거나 0이 아니다 (Task 0)"; exit 1; }
-shasum -a 256 -c .claude/plans/work-calendar-m2.rebaseline.sha256
+SHA256C .claude/plans/work-calendar-m2.rebaseline.sha256
 
 # 4. 스모크 하네스 — 브라우저에서 연다 (자동화 불가)
 #    빈 프로필/시크릿 창에서 test/positioning.smoke.html 을 열고:
@@ -1370,12 +1396,14 @@ UI4 를 지키는 이유이지 표면이 아니라는 뜻이 아니었는데, �
 - [ ] `[기계]` `node --check newtab.js` 통과
 - [ ] `[사람]` 스모크 하네스 단언 실패 0건
 - [ ] `[사람]` **시계 모드 경로 `snapshot()` diff 0** (UI13)
-- [ ] `[사람]` **달력 경로 `snapshot()` 기하 diff 0** — 이 플랜은 화면을 바꾸지 않으므로 **달력 쪽도 diff 0이어야 한다.** 후반부와 정반대 방향의 요구이고, 여기서 diff가 나면 점유나 렌더를 실수로 함께 고친 것이다
+- [ ] `[사람]` **달력 경로 `snapshot()` 기하 diff 0** — 이 플랜은 **기존 그리드 표면**을 바꾸지 않으므로 **달력 쪽도 diff 0이어야 한다.** 후반부와 정반대 방향의 요구이고, 여기서 diff가 나면 점유나 렌더를 실수로 함께 고친 것이다. **이 항목이 보는 것은 닫힌 모달 바깥의 기하뿐이다** — Task 4 가 더한 관문 편집기·프로젝트 선택기는 여기에 담기지 않고 아래 항목이 진다 (santa R2 B2)
+- [ ] `[사람]` **Task 4 가 더한 새 표면을 눈으로 판정한다** — 상세 모달을 열어 **관문 편집기**(프리셋 다섯 + 이름 없음 · 날짜 지정 · 완료 표시 · 범위축소)와 **프로젝트 선택기**가 (a) 기존 칩·뱃지 토큰만 쓰고 새 시각 언어를 만들지 않았는지(UI4), (b) 모달의 기존 컨트롤을 밀어내거나 겹치지 않는지, (c) 관문 0개·상한 초과·긴 프로젝트 이름에서 깨지지 않는지 확인한다. **등가 단언도 기하 diff 도 이 표면을 보지 못한다** — 닫힌 모달은 `snapshot()` 에 담기지 않고 도메인 투영은 마감 의미와 점유만 담는다. 게이트 밖에 남는 유일한 렌더 표면이므로 사람이 진다 (santa R2 B2, `## Design Critique` R1)
+- [ ] `[사람]` **`renderSummary()` 가 `getEventDueState()` 말고 다른 상태를 읽지 않는다** — `newtab.js:2673-2700` 을 읽어 확인한다. 이것이 등가 케이스가 `.calendar-summary` 문구를 **따로 단언하지 않는 근거**다(배너가 마감 상태의 순수 함수이므로 의미 단언에서 따라 나온다). 이 조건이 깨지면 배너는 자기 단언을 가져야 한다 (santa R2 B1)
 - [ ] `[기계+사람]` **`runCalendarV4EquivalenceCases()`가 존재하고(기계) 단언 둘이 통과한다(사람)** — `meaning`(마감 상태 · 배너 문구)이 v3 규칙의 참조 구현이 낸 기대값과 같고, **점유도 마이그레이션 전후로 같다** (DD15·DD3, 후반부와 정반대 방향)
 - [ ] `[사람]` v2 → v3 → v4 연쇄 마이그레이션 케이스 통과. **340px 캐시 정리는 정황 증인이지 시동 실행의 증명이 아니다** (DD10·DD16, santa R6 B4 — Task 2가 "이 하네스로는 v3가 시동에서 돌았다를 증명할 수 없다"고 적어 두었는데 이 항목이 "단언됐다"고 말하고 있었다. v4가 같은 캐시 정리를 직접 구현하면 v3를 건너뛰고도 통과한다. 증명되는 것은 "v3 변환 함수가 옳다"와 "v2 입력이 v4 상태로 끝난다"까지이고, 누가 언제 불렀는가는 `Application.initialize()`를 사람이 읽어 확인한다)
 - [ ] `[기계]` **베이스라인이 깨끗한 실행에서 나왔다** — `work-calendar-m2.baseline.json` 의 봉투에 `meta.assertFailures` 가 있고 그 값이 `0` 이다. 없거나 0이 아니면 이후 모든 비교의 전제가 무너져 있다. **손으로 고친 봉투는 잡지 못한다** (Task 0, L2 패널 invariant CRITICAL 둘 · HIGH 둘)
 - [ ] `[기계]` **앵커 둘이 있고 뒤엣것이 통과한다** — Task 0이 `baseline.sha256`을(구현 전 기록), Task 7이 재베이스라인 직후 `rebaseline.sha256`을 남겼고, **`shasum -a 256 -c .claude/plans/work-calendar-m2.rebaseline.sha256`이 통과한다.** 앞엣것으로 끝 상태를 검사하지 않는다 — Task 2~7이 하네스를 고치므로 설계상 깨진다 (DD23, santa R2 B3)
-- [ ] `[기계]` **Validation 2번의 약속 이행 검사가 통과한다** — `newtab.js`의 함수 **열하나**(`promoteEventsToV3` · `promoteEventsToV4` · `deriveEventRange` · `createCalendarGate` · `createCalendarProject` · `loadProjects` · `persistProjects` · `reconcileProjectRefs` · `addGate` · `updateGate` · `removeGate`)과 하네스 산출물 **다섯**(케이스 넷 — `runCalendarV4MigrationCases` · `runCalendarV4EquivalenceCases` · `runCalendarProjectCases` · `runCalendarGateCases` — 과 `spyOn` 헬퍼. `runCalendarOnboardingCases`는 후반부의 몫이라 여기서 세지 않는다)이 실제로 있고 등가 케이스가 `runAll()`에 연결됐다 (DD23. R4에서 `createCalendarGate`가 목록에서 빠져 개수가 맞지 않았다 — security F1. R5에서 `sanitizeImportedProjects`를 `reconcileProjectRefs`로 바꿨다 — DD28)
+- [ ] `[기계]` **Validation 2번의 약속 이행 검사가 통과한다** — `newtab.js`의 함수 **열둘**(`promoteEventsToV3` · `promoteEventsToV4` · `deriveEventRange` · `createCalendarGate` · `createCalendarProject` · `loadProjects` · `persistProjects` · `reconcileProjectRefs` · **`normalizeGates`** · `addGate` · `updateGate` · `removeGate` — **`normalizeGates` 가 R2 까지 이 목록과 Validation 2 루프 둘 다에서 빠져 있었다.** 도입부는 열둘을 만들라 하고 검사는 열하나만 돌아, DD36 의 유일한 집행 지점이 약속 이행 검사 밖에 있었다. santa R2 A1)과 하네스 산출물 **다섯**(케이스 넷 — `runCalendarV4MigrationCases` · `runCalendarV4EquivalenceCases` · `runCalendarProjectCases` · `runCalendarGateCases` — 과 `spyOn` 헬퍼. `runCalendarOnboardingCases`는 후반부의 몫이라 여기서 세지 않는다)이 실제로 있고 등가 케이스가 `runAll()`에 연결됐다 (DD23. R4에서 `createCalendarGate`가 목록에서 빠져 개수가 맞지 않았다 — security F1. R5에서 `sanitizeImportedProjects`를 `reconcileProjectRefs`로 바꿨다 — DD28)
 - [ ] `[기계]` **Validation 2b번의 호출 자리 검사가 통과한다** — 다섯 함수(`createCalendarEvent` · `promoteEventsToV4` · `addGate` · `updateGate` · `removeGate`)의 **본문 안에** 각각 `deriveEventRange(`가 있고(DD26), **넷**(`createCalendarEvent` · `addGate` · `updateGate` · `removeGate`)의 본문 안에 각각 `normalizeGates(`가 있으며(DD36 — 이것이 없으면 DD25의 접기가 사용자 입력 경로에서 통째로 빠진다), 병목 둘(`persistProjects` · `replaceEvents`)의 **본문 안에** 각각 `reconcileProjectRefs(`가 **`projectsLoaded` 인자와 함께** 있고(DD28), **둘**(`addEvent` · `updateEvent`)의 본문 안에 `allowLegacyGateSynthesis`가 있으며(Task 1 — 없으면 이 Task 직후부터 새 일정을 만들 수 없다. R13 architect HIGH), `DD3-FIXTURE` 표식이 4개 이상 · `V2V3V4-CHAIN` 표식이 1개 이상이다(Task 5의 고정 입력과 Task 2의 연쇄 케이스 — 이 둘만 여전히 하한 검사다). **자리는 특정하되 본문 안에서의 위치는 특정하지 못한다** — "반환 직전"·"커밋 직전"인가는 아래 항목의 spy가 판정한다 (R7 invariant F3·F5 · R10 architect HIGH · R10 invariant CRITICAL)
 - [ ] `[사람]` **`deriveEventRange` 호출·결과 단언이 통과한다** — `promoteEventsToV4()`가 각 이벤트에 그것을 부르고, 승격된 전건의 `startDate`·`endDate`가 관문의 `min`·`max`와 일치한다 (DD26의 셋째 호출 자리, R4 architect F1)
 - [ ] `[사람]` **프로젝트 목록을 읽지 못한 상태에서는 강등하지 않는다** — `projectsLoaded`가 거짓일 때 `reconcileProjectRefs()`가 입력을 그대로 돌려주고, 가져온 이벤트의 `projectId`가 살아남는다 (R9 security F3 — 이것이 없으면 DD28이 참조 무결성 대신 데이터 소실을 만든다)
@@ -1427,7 +1455,7 @@ UI4 를 지키는 이유이지 표면이 아니라는 뜻이 아니었는데, �
 
 **그러므로 이 마일스톤이 기계로 주장하는 것을 여기 좁혀 적는다**(L2 패널 invariant
 CRITICAL). 위 목록의 `[기계]` 항목이 전부 통과했을 때 증명된 것은 넷이다 —
-(1) `newtab.js` 문법이 깨지지 않았다, (2) 이 플랜이 약속한 함수 열하나와 하네스 산출물
+(1) `newtab.js` 문법이 깨지지 않았다, (2) 이 플랜이 약속한 함수 열둘과 하네스 산출물
 다섯이 **이름으로 존재하고** `runAll()` 에 배선됐다, (3) DD26 · DD28 · DD36 · DD37 ·
 DD10 · DD27b 가 지정한 호출 자리가 **비어 있지 않다**, (4) 재베이스라인 앵커가 맞는다.
 **그 넷 중 어느 것도 "구현이 옳다" 가 아니다.**
