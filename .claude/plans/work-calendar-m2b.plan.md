@@ -98,7 +98,7 @@ santa 루프가 8라운드를 돌고 캡에서 종료했다(`.claude/reviews/san
 
 전반부가 하네스와 베이스라인을 이미 한 번 움직였다. 이 플랜의 diff 축은 **전반부가 끝난 상태**를 기준으로 재야 하므로, 전반부의 `rebaseline.sha256`을 그대로 쓰지 않고 Task 0이 새로 뜬다.
 
-앵커는 셋이 된다 — 전반부의 `baseline.sha256`(구현 전 기록)·`rebaseline.sha256`(전반부 종료), 그리고 이 플랜의 `m2b-rebaseline.sha256`(후반부 종료). 셋의 차이가 M2 전체가 하네스를 어떻게 움직였는지의 감사 기록이다.
+앵커는 셋이 된다 — 전반부의 `work-calendar-m2.baseline.sha256`(구현 전 기록)·`work-calendar-m2.rebaseline.sha256`(전반부 종료), 그리고 이 플랜의 `work-calendar-m2b.rebaseline.sha256`(후반부 종료). 셋 다 `.claude/plans/` 아래에 있고 셋의 차이가 M2 전체가 하네스를 어떻게 움직였는지의 감사 기록이다. **축약명(`m2b-rebaseline.sha256` 식)을 쓰지 않는다** — 앞선 판이 이 자리와 Acceptance 에서만 축약명을 써 Files to Change·Task 0·Validation 이 요구하는 실제 파일과 다른 이름 체계를 가리켰고, 그러면 체크리스트를 수행한 사람과 `-c` 가 검사하는 대상이 갈라진다(santa R3 B2 — santa R0·R1 에 이어 세 번째로 올라온 지적이라 이번에 고친다).
 
 ## 이 플랜이 다루지 않는 것
 
@@ -132,7 +132,7 @@ santa 루프가 8라운드를 돌고 캡에서 종료했다(`.claude/reviews/san
   **만드는 것 — 셋이다.**
   1. `work-calendar-m2b.baseline.json` — 하네스의 `베이스라인 내보내기` 버튼으로 내려받아 저장소 루트에 둔다. **버튼과 그 리스너는 전반부 Task 0이 이미 만들었다**(`test/positioning.smoke.html`의 마크업 + `test/positioning.smoke.js`의 `addEventListener`) — 이 플랜은 그것을 쓰기만 한다
   2. `.claude/plans/work-calendar-m2b.baseline.sha256` — `shasum -a 256 test/positioning.smoke.js work-calendar-m2b.baseline.json > .claude/plans/work-calendar-m2b.baseline.sha256` — **`shasum` 이 없으면 `sha256sum` 에 같은 인자를 준다.** 출력 형식이 같아 `-c` 가 서로 읽는다 (santa R2 B0)
-  3. 전반부가 끝난 상태에서 **단언 실패 0건**임을 먼저 확인한다. 실패가 있는 채로 뜬 베이스라인은 회귀를 기준으로 굳힌다
+  3. 전반부가 끝난 상태에서 **단언 실패 0건**임을 먼저 확인한다. 실패가 있는 채로 뜬 베이스라인은 회귀를 기준으로 굳힌다. **그리고 그 사실이 봉투에 남아야 한다** — `베이스라인 내보내기`가 내려주는 JSON 의 `meta.assertFailures` 가 `0` 이어야 하고, **Validation 3 이 그 값을 기계로 읽어 아니면 죽는다**(santa R3 B1). 눈으로 확인하는 것만으로는 오염된 베이스라인이 앵커로 굳는 것을 막지 못한다 — 전반부는 이 기계 검사를 갖고 있었는데 분할 때 이쪽으로 오지 않았다
 
   **고치는 것**: 없다.
 
@@ -270,6 +270,16 @@ elif command -v sha256sum >/dev/null 2>&1; then
 else
   echo "ANCHOR: shasum 도 sha256sum 도 없다 — 앵커 검사를 돌릴 수 없다"; exit 1
 fi
+#    **첫 앵커가 있는가** — Task 0 을 통째로 건너뛴 실행을 여기서 잡는다. 존재 검사는
+#    `-c` 가 아니므로 재베이스라인과 충돌하지 않고, 사슬이 시작은 됐는지를 본다.
+[ -f .claude/plans/work-calendar-m2b.baseline.sha256 ] || { echo "work-calendar-m2b.baseline.sha256 이 없다 — Task 0 의 앵커가 아예 없다(사슬이 시작되지 않았다)"; exit 1; }
+#    **그리고 그 베이스라인이 깨끗한 실행에서 나왔는가** (santa R3 B1). 해시는 파일과
+#    자기 해시가 맞는지만 보므로 **단언이 깨진 실행에서 뜬 베이스라인도 자기 해시와는
+#    완벽히 맞는다** — 게이트가 성공하면서 전제가 무너지는 자리다. 그러면 실패한 실행의
+#    스냅샷이 정상 기준으로 굳고, 이후 Compare 는 진짜 회귀를 그 오염된 기준과의 일치로
+#    오인해 통과시킨다. 전반부 Validation 3 은 이 검사를 갖고 있었는데 **분할 때 이쪽으로
+#    오지 않아 후반부만 fail-open 으로 남아 있었다.** Task 0 이 봉투에 담은 수를 읽는다.
+grep -qE '"assertFailures"[[:space:]]*:[[:space:]]*0' work-calendar-m2b.baseline.json || { echo "work-calendar-m2b.baseline.json 이 단언 실패 0건을 증명하지 못한다 — 봉투에 meta.assertFailures 가 없거나 0이 아니다 (Task 0)"; exit 1; }
 SHA256C .claude/plans/work-calendar-m2b.rebaseline.sha256
 
 # 4. 스모크 하네스 — 브라우저에서 연다 (자동화 불가)
@@ -295,7 +305,8 @@ SHA256C .claude/plans/work-calendar-m2b.rebaseline.sha256
 - [ ] `[사람]` Task 0~5 전부 완료
 - [ ] `[기계]` `node --check` 둘 다 통과
 - [ ] `[기계]` **Validation 2번이 통과한다** — 함수 둘의 존재, `runAll()` 배선 둘, `DD31-FIXTURE` 표식 **다섯**(santa R0 B2 가 같은 날 관문 둘 케이스를 더했다)
-- [ ] `[기계]` **앵커 둘이 있고 뒤엣것이 통과한다** — Task 0이 `m2b-baseline.sha256`을(구현 전 기록), Task 4가 재베이스라인 직후 `m2b-rebaseline.sha256`을 남겼고 `shasum -c`가 후자에서 통과한다
+- [ ] `[기계]` **앵커 둘이 있고 뒤엣것이 통과한다** — Task 0이 `.claude/plans/work-calendar-m2b.baseline.sha256`을(구현 전 기록), Task 4가 재베이스라인 직후 `.claude/plans/work-calendar-m2b.rebaseline.sha256`을 남겼고 `SHA256C`가 후자에서 통과한다 (santa R3 B2 — 앞선 판은 이 줄에서만 `m2b-baseline.sha256` 식 축약명을 써 Files to Change·Task 0·Validation 이 요구하는 실제 파일명과 다른 체계를 가리키고 있었다)
+- [ ] `[기계]` **베이스라인이 깨끗한 실행에서 나왔다** — `work-calendar-m2b.baseline.json` 의 봉투에 `meta.assertFailures` 가 있고 그 값이 `0` 이다. 없거나 0이 아니면 이후 모든 비교의 전제가 무너져 있다. **손으로 고친 봉투는 잡지 못한다** (Task 0, santa R3 B1 — 전반부에는 있고 후반부에는 없던 검사다)
 - [ ] `[사람]` 스모크 하네스 단언 실패 0건
 - [ ] `[사람]` **시계 모드 경로 `snapshot()` diff 0** (UI13)
 - [ ] `[기계+사람]` **`runCalendarOccupancyCases()`가 존재하고(기계) 단언 다섯이 통과한다(사람)** — 점유가 관문 집합과 같고, 관문에 없던 날을 점유하지 않고, 칩이 `min(버킷 길이, MAX_CHIPS_PER_CELL)`와 같고, 4일 폭 입력에서 점유가 둘로 줄고, **같은 날 `dev`·`review` 관문을 가진 이벤트 하나의 버킷 길이가 1이다**(DD31의 이벤트별 접기). **마지막 항이 빠지면 접기를 빼먹은 구현이 최종 게이트를 통과하고, 그리드에는 칩 둘 · 패널에는 이벤트 하나가 남는다** — DD32가 막으려는 불일치가 그대로 출하된다 (santa R1 B3)

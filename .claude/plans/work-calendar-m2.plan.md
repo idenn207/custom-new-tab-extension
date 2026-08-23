@@ -173,7 +173,7 @@ PRD가 M2에 요구한 것이 정확히 그 구분이다 — "조기·지연·�
 
 **DD13** — 첫 실행 온보딩. **후반부로 갔다**(`work-calendar-m2b.plan.md`) — 온보딩이 만드는 프로젝트를 읽는 화면이 그쪽에서 적응되므로, 여기서 만들면 만들자마자 보이지 않는다.
 
-**DD14 — 되돌릴 수 있는 순서를 Task 배치가 강제한다.** Task 1~2(스키마와 마이그레이션)까지는 화면이 옛 경로로 그대로 돈다. Task 5(렌더 적응)가 첫 비가역 지점이고, 그 앞에 Task 0의 베이스라인과 Task 2의 마이그레이션 케이스가 선다. 온보딩(Task 6)을 렌더(Task 5)보다 **앞**에 두는 안은 기각했다 — 온보딩이 만드는 것은 프로젝트인데, 프로젝트를 읽는 화면이 아직 적응되지 않은 자리에서 그것을 만들면 만들자마자 보이지 않는다. 백업 경로는 이 순서 논의에서 아예 빠졌다(아래 범위 축소) — 그것이 담을 스키마를 Task 1~4가 확정하므로, M2.5는 확정된 스키마 위에서 시작한다.
+**DD14 — 되돌릴 수 있는 순서를 Task 배치가 강제한다.** Task 1~2(스키마와 마이그레이션)까지는 화면이 옛 경로로 그대로 돈다. **그 약속은 Task 1 과 Task 2 의 경계에 걸린 것 하나에 달려 있다**(santa R3 B0) — `loadEvents()` 의 `allowLegacyGateSynthesis` 를 `false` 로 뒤집는 일은 **Task 2 가** `SETTINGS_VERSION = 4` · 시동 마이그레이션과 **같은 원자 단계**에서 한다. Task 1 에 두면 v4 가 아직 없는 구간에서 기존 v3 행(`gates` 없음)이 전부 손상으로 판정되어 `loadFailed` 가 서고, **이 문장이 Task 1 단독 커밋에서 거짓이 된다.** Task 5(렌더 적응)가 첫 비가역 지점이고, 그 앞에 Task 0의 베이스라인과 Task 2의 마이그레이션 케이스가 선다. 온보딩(Task 6)을 렌더(Task 5)보다 **앞**에 두는 안은 기각했다 — 온보딩이 만드는 것은 프로젝트인데, 프로젝트를 읽는 화면이 아직 적응되지 않은 자리에서 그것을 만들면 만들자마자 보이지 않는다. 백업 경로는 이 순서 논의에서 아예 빠졌다(아래 범위 축소) — 그것이 담을 스키마를 Task 1~4가 확정하므로, M2.5는 확정된 스키마 위에서 시작한다.
 
 ### L2 리뷰가 되돌려보낸 것 — 판정 축의 재설계 (DD15~DD16)
 
@@ -622,7 +622,9 @@ Task 7 허용 diff·Acceptance 세 자리를 동시에 흔들었고 그 셋이 �
   6. typedef 둘 — `CalendarGate` · `CalendarProject`
 
   **이 Task가 고치는 것 — 하나다.**
-  - `loadEvents()`(`newtab.js:2062`) — `createCalendarEvent(input, { allowLegacyGateSynthesis: false })`로 부른다(santa R7 B1 — 저장소가 이미 v4면 `gates` 없는 행은 레거시가 아니라 손상이다). 버린 항목 수를 세고, **하나라도 있으면 `this.loadFailed = true`로 두고 `hideError()`를 부르지 않는다** (santa R5 B1). 현재는 `.filter()`로 버린 뒤 곧바로 `loadFailed = false`를 세우므로, 손상 이벤트가 조용히 사라지고 다음 편집이 그 삭제를 영구 커밋한다
+  - `loadEvents()`(`newtab.js:2062`) — **이 Task 에서는 `createCalendarEvent(input, { allowLegacyGateSynthesis: true })`로 부른다.** `createCalendarEvent()` 의 기본값이 `false` 이므로(아래) **명시적으로 넘겨야 한다.** 버린 항목 수를 세고, **하나라도 있으면 `this.loadFailed = true`로 두고 `hideError()`를 부르지 않는다** (santa R5 B1). 현재는 `.filter()`로 버린 뒤 곧바로 `loadFailed = false`를 세우므로, 손상 이벤트가 조용히 사라지고 다음 편집이 그 삭제를 영구 커밋한다
+
+    **`false`로 뒤집는 것은 Task 2 이고 이 Task 가 아니다**(santa R3 B0). 뒤집는 근거는 "저장소가 이미 v4면 `gates` 없는 행은 레거시가 아니라 손상이다"(santa R7 B1)인데 — **그 전제는 v4 가 존재한 뒤에만 참이다.** 지금 저장소는 v3 이고(`newtab.js:18` `SETTINGS_VERSION = 3`) 저장된 행에는 `gates` 가 없다. 이 Task 에서 `false`로 뒤집으면 기존 행이 **하나도 남김없이** 손상으로 판정되고, 바로 위 규칙에 따라 `loadFailed = true` 가 서서 **달력이 통째로 잠긴 채 쓰기까지 막힌다.** 그러면 DD14 가 약속한 "Task 1~2 까지는 화면이 옛 경로로 그대로 돈다" 가 **Task 1 단독 커밋에서 거짓이 된다** — 되돌릴 수 있는 순서를 지키려고 쓴 문장이 정작 그 순서 위에서 깨진다. 뒤집기는 `SETTINGS_VERSION = 4` · `migrateCalendarToV4()` 배선과 **같은 원자 단계**에 있어야 하고, 그 자리가 Task 2 다
   - `handleCalendarExport()`(`newtab.js:4036`) — 내보내기에 **버전 봉투**를 씌운다: `{ version: 4, events: [...] }` (santa R7 B1). 지금은 맨 배열이라 v3 내보내기와 손상된 v4 내보내기가 구별되지 않는다
   - `sanitizeImportedEvents()`(`newtab.js:492`) — **봉투를 읽어 `allowLegacyGateSynthesis`를 정한다**(맨 배열 → `true`, `version: 4` → `false`, 그 밖의 객체 → 거절). 그리고 검증 탈락 항목이 하나라도 있으면 **배치 전체를 거절한다** (santa R5 B1 · R7 B1). 현재는 `if (!event) return;`으로 그 항목만 건너뛴다. 상한 초과에 이미 쓰고 있는 "조용히 자르지 않고 전체를 거절" 판단을 같은 함수 안에서 같은 이유로 넓히는 것이다
   - `addEvent()`(`newtab.js:2251`) · `updateEvent()`(`newtab.js:2264`) — **`{ allowLegacyGateSynthesis: true }`를 넘긴다.** 이 줄이 없으면 **이 Task 직후부터 새 일정을 만들 수 없다**(R10 architect HIGH). 지금 두 함수는 `createCalendarEvent(input)`을 **옵션 없이** 부르고(`newtab.js:2252`) 폼이 넘기는 것은 `{startDate, endDate, title, ...}`라 `gates` 키가 없다 — 기본값 `false`면 생성 게이트가 `null`을 돌려주고 `addEvent()`가 `false`를 반환한다. 앞선 판은 호출부 셋(`loadEvents`·`sanitizeImportedEvents`·`promoteEventsToV4`)에만 값을 적고 **사용자 생성 경로를 적지 않았다.** 기본값이 `false`인 것은 옳다(모르면 재구성하지 않는다) — 틀린 것은 아는 자리에 값을 안 적은 쪽이다.
@@ -707,10 +709,11 @@ R11 architect HIGH 둘): 아래 넷이 곧 **`normalizeGates(inputGates)` 의 �
   5. `test/positioning.smoke.js` `spyOn(frameWindow, name)` → `{ calls, restore() }` — **이 Task의 산출물이다.** Validate가 이것을 쓰므로 없으면 Validate가 돌지 않는다
   6. `test/positioning.smoke.js` `runCalendarV4MigrationCases(collector)`
 
-  **이 Task가 고치는 것 — 셋이다.**
+  **이 Task가 고치는 것 — 넷이다.**
   - `migrateCalendarToV3()`(`newtab.js:410`) — 가드를 `SETTINGS_VERSION`에서 `SETTINGS_VERSION_V3`로 바꾸고(DD10), 승격 본문을 `promoteEventsToV3()` **호출로 교체한다.** 자체 구현을 남겨 두면 DD16의 spy 카운터가 0이 되어 판정이 죽는다. 340px 캐시 정리는 **껍데기에 그대로 남긴다**
   - `SETTINGS_VERSION`을 `3` → `4`
   - `Application.initialize()`(`newtab.js:4110`) — v2 → v3 다음에 v4를 잇고 **그 결과를 `const v4Ok = await migrateCalendarToV4();` 로 받는다.** `v2Ok`·`v3Ok`(`newtab.js:4115-4116`)와 같은 스코프에 서야 한다 — **받지 않으면 두 `applyStorageNotice()` 호출이 v4 실패를 담을 값을 갖지 못하고, `migrateCalendarToV4()`는 v3와 같은 모양이라 `catch`에서 `false`를 돌려주고 던지지 않으므로 실패가 통째로 조용해진다**(santa R0 B4). 4120의 첫 호출도 함께 고친다 — `applyStorageNotice({ migrationFailed: !v2Ok || !v3Ok || !v4Ok })`. v4는 4120보다 앞서 끝나므로 그 시점에 `v4Ok`가 이미 서 있다
+  - `loadEvents()`(`newtab.js:2062`) — Task 1 이 `{ allowLegacyGateSynthesis: true }` 로 두었던 것을 **여기서 `false` 로 뒤집는다**(santa R3 B0). 이 Task 가 `SETTINGS_VERSION = 4` 와 시동 마이그레이션을 함께 세우므로 **이 줄부터 저장소는 v4 이고**, `gates` 없는 행은 레거시가 아니라 손상이다(santa R7 B1). **뒤집기가 이 Task 안에 있어야 하는 이유는 원자성이다** — 앞 Task 에 두면 v4 가 아직 없는 구간에서 기존 v3 행이 전부 손상으로 판정되어 달력이 잠기고 DD14 가 깨진다. 세 변경(`SETTINGS_VERSION` · 시동 배선 · 이 뒤집기)은 **한 커밋에 함께 간다**
 
   세부는 아래에 잇는다. `SETTINGS_VERSION_V3 = 3` 상수를 새로 만들고 `migrateCalendarToV3()`의 가드를 그것으로 바꾼 뒤(DD10) `SETTINGS_VERSION = 4`로 올린다. `migrateCalendarToV4()`를 추가한다 — 자체 가드(`>= SETTINGS_VERSION`), 각 이벤트에 대해 `gates = uniqueDates([startDate, endDate]).map(...)`(DD1), 만들어지는 관문은 `kind: null`(DD2), 종단 관문의 `status`는 이벤트의 `done`을 물려받고 나머지는 `pending`, `actual`은 전부 `null`(v3에 완료 시각이 없으므로 없는 값을 만들지 않는다). `projectId: null`로 시작하고 `calendarProjects: []`를 함께 쓴다. 세 키를 **한 번의 `set()`으로** 커밋한다.
   **`promoteEventsToV4()`는 각 이벤트를 돌려주기 직전에 `deriveEventRange(event)`를 부른다**(DD26의 셋째 호출 자리). 이 문장이 R4에서 CRITICAL 둘로 지목됐다(test F1 · invariant F4) — DD26이 "셋째 호출이 없으면 `startDate ≠ min(planned)`인 이벤트가 커밋된다"고 경고해 놓고, **Task Action에는 그 호출을 적지 않았다.** 결정에만 있고 지시에 없는 요구는 구현되지 않는다. `Application.initialize()`의 v2 → v3 다음에 v4를 잇는다 — **반환값을 `v4Ok`로 받고 4120의 `applyStorageNotice()`에 `!v4Ok`를 더하는 것까지가 그 지시다**(위 "고치는 것" 셋째 항).
@@ -1416,7 +1419,7 @@ UI4 를 지키는 이유이지 표면이 아니라는 뜻이 아니었는데, �
 - [ ] `[사람]` **탈락 항목이 있는 가져오기는 배치째 거절된다** — 유효 항목 둘과 무효 항목 하나가 든 파일을 가져왔을 때 **아무것도 들어오지 않고** 기존 일정이 그대로인지 단언한다. 지금 코드는 무효 하나만 건너뛰고 둘을 들인다 (Task 1, santa R5 B1)
 - [ ] `[사람]` **`reconcileProjectRefs()`가 인자 누락을 즉시 드러낸다** — 셋째 인자 없이 부르면 던지는지 단언한다. 부재 시 `false`로 읽는 fail-closed 기본값은 안전하지만 **빠뜨린 사실 자체를 영영 숨기므로**, R1·R2가 두 번 다친 자리에 문서 규약 말고 실행 시점 단언을 하나 둔다 (DD28, santa R5 A 제안)
 - [ ] `[사람]` **Task 1 직후에도 새 일정을 만들 수 있다** — 폼이 넘기는 모양(`{startDate, endDate, title}`, `gates` 키 없음)으로 `addEvent()`를 불렀을 때 `true`를 돌려주고 관문이 선 이벤트가 생기는지, `updateEvent()`도 같은지 단언한다. 두 함수가 `allowLegacyGateSynthesis: true`를 안 넘기면 생성 게이트가 `null`을 돌려주고 이 단언이 죽는다 — 그리고 그것이 **DD14의 "Task 1~2까지는 옛 경로로 돈다"가 깨지는 자리**다 (Task 1, R10 architect HIGH)
-- [ ] `[사람]` **`gates` 키만 잃은 v4 행은 재구성되지 않는다** — v4 저장소에 `gates` 키만 지운 행을 넣었을 때 `loadEvents()`가 그것을 `null`로 버리고 봉인하는지, **레거시 범위에서 익명 관문 둘로 되살아나지 않는지** 단언한다. `allowLegacyGateSynthesis` 기본값이 참이면 이 단언이 죽는다 (Task 1, santa R7 B1)
+- [ ] `[사람]` **`gates` 키만 잃은 v4 행은 재구성되지 않는다**(그 판정을 켜는 `allowLegacyGateSynthesis: false` 뒤집기는 **Task 2** 가 한다 — Task 1 은 `true` 로 두어 v3 저장소를 살려 둔다, santa R3 B0) — v4 저장소에 `gates` 키만 지운 행을 넣었을 때 `loadEvents()`가 그것을 `null`로 버리고 봉인하는지, **레거시 범위에서 익명 관문 둘로 되살아나지 않는지** 단언한다. `allowLegacyGateSynthesis` 기본값이 참이면 이 단언이 죽는다 (Task 1, santa R7 B1)
 - [ ] `[사람]` **내보내기 봉투가 가져오기의 판단 근거가 된다** — 맨 배열 파일은 v3 레거시로 들어오고(관문 재구성), `{version:4}` 봉투 파일에서 `gates` 없는 행은 거절되며, **모르는 봉투는 전부 `throw` 로 죽고 저장소가 그대로인지** 단언한다. 모르는 봉투는 넷을 각각 본다 — `version` 부재 · `{version: 3}` · `{version: 999}` · `version: 4` 인데 `events` 가 배열이 아닌 것. 화이트리스트가 블랙리스트로 구현되면 뒤의 셋 중 하나가 통과하고, 통과한 그것은 **부분 가져오기**가 된다 (Task 1, santa R7 B1 · R11 security HIGH·MEDIUM)
 - [ ] `[사람]` **정상 v4 봉투가 자기 자신에게 거절되지 않는다** — 이 Task 가 내보낸 `{version:4, events:[...]}` 파일을 그대로 다시 가져왔을 때 전건이 들어오는지 단언한다. 봉투 판별이 `Array.isArray(raw)` 검사보다 **뒤**에 놓이면 "최상위 구조가 배열이 아닙니다"로 죽으므로, 이 한 줄이 그 순서를 지킨다 (Task 1, R11 security HIGH)
 - [ ] `[사람]` **같은 날짜의 이름 없는 관문은 접히고 이름 있는 관문은 접히지 않는다** — `addGate` 로 (a) `kind: null` 을 같은 날에 두 번 넣으면 관문 수가 늘지 않고, (b) 같은 날 `dev`·`review` 는 둘 다 서는지 단언한다. (b)가 없으면 "전부 접는" 구현이 (a)만으로 통과하고, 그것은 DD25 가 담으려는 업무 모양을 지운다 (DD25, Task 4, R11 architect HIGH)
