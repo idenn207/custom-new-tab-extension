@@ -3027,3 +3027,125 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
     transform: none;
   }
 }
+
+/* ─────────────────────────────────────────────────────────────
+   관문 편집기 (Task 4)
+
+   **새 시각 언어를 만들지 않는다** (UI4). 기존 칩·뱃지 토큰과 완료 표시 관용구를
+   그대로 쓰고, 관문 종류 다섯과 status 셋에 **시각 축(hue)을 주지 않는다** —
+   종류는 글자 라벨로, status 는 취소선과 흐림으로만 구별한다. 부하·중요도의
+   시각 언어는 M3 의 첫 결정이고 UI4 가 앞당기기를 금지한다.
+   ───────────────────────────────────────────────────────────── */
+
+.gate-list {
+  list-style: none;
+  margin: 6px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gate-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  font-size: 13px;
+  color: var(--text-primary);
+}
+
+/* 종류 라벨. 색이 아니라 글자다 — 이름 없는 관문은 '이름 없음' 글자 하나. */
+.gate-kind {
+  flex: 0 0 auto;
+  min-width: 58px;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  color: var(--text-secondary);
+}
+
+.gate-planned {
+  flex: 1 1 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 계획 대비 실제 (DD6). 저장만 하고 회고 화면을 만들지 않는다 (UI7) —
+   그 관문을 보고 있을 때 그 자리에서 한 줄로만 나온다. */
+.gate-actual {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* done — 기존 완료 표시 관용구를 그대로 쓴다 (.calendar-todo-item.is-done). */
+.gate-item.is-done .gate-planned {
+  color: var(--text-secondary);
+  text-decoration: line-through;
+}
+
+/* dropped — 취소선과 흐림. 계획은 남되 먼저 보이지 않는다.
+
+   흐림은 **글자에만** 건다. .gate-item 에 걸면 자식인 .gate-action 까지 함께
+   흐려져 '복구' 버튼의 대비가 내려간다 — 되돌리기가 가장 필요한 줄에서 그 버튼이
+   가장 안 보이게 되는 것은 방어할 수 없다. */
+.gate-item.is-dropped .gate-kind,
+.gate-item.is-dropped .gate-planned,
+.gate-item.is-dropped .gate-actual {
+  opacity: 0.55;
+}
+.gate-item.is-dropped .gate-planned {
+  text-decoration: line-through;
+}
+
+.gate-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 4px;
+}
+
+.gate-action {
+  background: none;
+  border: none;
+  padding: 2px 6px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 4px;
+  /* 44px 셀 규칙이 아닌 모달 안이라 조밀해도 되지만, 최소 히트 영역은 남긴다. */
+  min-height: 24px;
+}
+.gate-action:hover {
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* 넷째부터는 접는다. summary 는 남은 개수만 말한다. */
+.gate-more {
+  margin-top: 2px;
+}
+.gate-more > summary {
+  cursor: pointer;
+  font-size: 11px;
+  color: var(--text-secondary);
+  list-style: none;
+  padding: 2px 0;
+}
+.gate-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.gate-add-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  align-items: center;
+}
+.gate-add-row select,
+.gate-add-row input[type='date'] {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.gate-add-row button {
+  flex: 0 0 auto;
+}

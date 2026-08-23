@@ -12,6 +12,15 @@
  */
 
 const BASELINE_KEY = '__smokeBaseline';
+
+/**
+ * 베이스라인을 뜬 그 실행의 단언 실패 수. **BASELINE_KEY와 같은 set()으로 커밋한다.**
+ *
+ * 단언이 깨진 실행에서 뜬 베이스라인은 이후 모든 비교를 무의미하게 만든다.
+ * 그 사실이 파일에 남지 않으면 shasum -c는 "오염된 파일과 그 해시가 맞는다"만
+ * 증명하고, 게이트 기계가 성공하면서 전제가 무너진다.
+ */
+const BASELINE_META_KEY = '__smokeBaselineMeta';
 const POSITIONS = [
   'top-left',
   'top-center',
@@ -238,6 +247,40 @@ function snapshot(frameWindow) {
  * 케이스 결과 누적기
  * @returns {{add: (name: string, value: unknown, errors?: string[]) => void, results: Record<string, unknown>}}
  */
+/**
+ * 전역 함수 호출을 세는 스파이 (Task 2가 만들고 Task 3·4가 재사용한다)
+ *
+ * DD24의 **호출 층위**를 보는 도구다. 결과만 보면 우연히 맞은 경우를 통과시키고,
+ * 호출만 보면 잘못 부른 경우를 놓친다 — 두 층위를 함께 걸어야 한다.
+ *
+ * `newtab.js`는 클래식 스크립트이므로 최상위 `function` 선언이 전역 객체의 속성이
+ * 된다. 그래서 그 속성을 갈아 끼우면 내부 호출도 래퍼를 지난다. (`const`로 선언된
+ * 상수는 전역 객체에 붙지 않으므로 같은 방법으로 볼 수 없다.)
+ *
+ * **케이스는 반드시 `try/finally`로 감싸 `restore()`한다.** 복원하지 않으면 뒤따르는
+ * 케이스가 래퍼를 쓰게 되고, 그것은 `runAll()`이 저장소를 복원하는 규약과 같은 이유다.
+ * @param {Window} frameWindow
+ * @param {string} name
+ * @returns {{calls: number, restore: () => void}}
+ */
+function spyOn(frameWindow, name) {
+  const original = frameWindow[name];
+  if (typeof original !== 'function') {
+    throw new Error(`spyOn: ${name} 은 함수가 아니다 (전역 객체에 없거나 const 선언이다)`);
+  }
+  const state = {
+    calls: 0,
+    restore() {
+      frameWindow[name] = original;
+    },
+  };
+  frameWindow[name] = function spy() {
+    state.calls += 1;
+    return original.apply(this, arguments);
+  };
+  return state;
+}
+
 function createCollector() {
   /** @type {Record<string, unknown>} */
   const results = {};
@@ -548,6 +591,654 @@ async function runCalendarV3MigrationCases(collector) {
 }
 
 /**
+ * 달력 v4 마이그레이션 — 관문 승격 / 멱등 / 잔존 필드 / v2→v3→v4 연쇄
+ *
+ * DD24의 세 층위 중 **변환 층위**가 주 증인이다. 시동 호출은 spy 로 셀 수 없다 —
+ * `loadApp()`은 초기화가 끝난 뒤에야 반환하므로 그 spy 는 언제나 0을 센다. 그래서
+ * 증명 대상을 바꿔 순수 함수를 **직접 부른다**(DD19가 여기서 값을 낸다).
+ * @param {ReturnType<typeof createCollector>} collector
+ */
+async function runCalendarV4MigrationCases(collector) {
+  const frameWindow = await loadApp({
+    settingsVersion: 2,
+    widgetType: 'calendar',
+    mainWidgetEnabled: true,
+    searchEnabled: true,
+    // V2V3V4-CHAIN — v2 데이터가 v3를 거쳐 v4까지 한 번에 올라오는 케이스다.
+    // 340px 캐시는 v3에만 있는 부수효과라 "v3가 실제로 돌았다"의 보조 증인이 된다.
+    // DD10의 함정(새 마이그레이션이 SETTINGS_VERSION을 올려 v3가 영영 실행되지
+    // 않는 것)은 이 케이스에서만 드러난다.
+    searchWidthByWidget: { clock: 420, calendar: 340 },
+    calendarEvents: [
+      { id: 'v2-single', date: '2026-08-06', title: 'v2 단일', done: false, createdAt: 1, source: 'local', externalId: null },
+      { id: 'v2-done', date: '2026-08-20', title: 'v2 완료', done: true, createdAt: 2, source: 'local', externalId: null },
+      { id: 'v3-range', startDate: '2026-09-01', endDate: '2026-09-05', date: '2026-09-01', title: 'v3 범위', done: false, createdAt: 3, note: '메모', priority: 'high', updatedAt: 3, source: 'local', externalId: null },
+    ],
+  });
+
+  const first = await chrome.storage.local.get([
+    'settingsVersion',
+    'calendarEvents',
+    'calendarProjects',
+    'searchWidthByWidget',
+  ]);
+  const promoted = Array.isArray(first.calendarEvents) ? first.calendarEvents : [];
+  const byId = (id) => promoted.find((event) => event.id === id);
+  const widths = first.searchWidthByWidget || {};
+
+  assert(
+    widths.calendar === undefined,
+    'V2V3V4-CHAIN: v2→v4 연쇄에서 v3가 실행되지 않았다 — 340px 캐시가 남아 있다'
+  );
+  assert(first.settingsVersion === 4, 'v4 마이그레이션이 settingsVersion을 4로 올리지 않았다');
+
+  // 축 1 — 초회 승격
+  collector.add(
+    'migration-v4/01-promote',
+    {
+      settingsVersion: first.settingsVersion,
+      count: promoted.length,
+      gateCounts: promoted.map((event) => `${event.id}=${event.gates.length}`),
+      // 마이그레이션이 만드는 관문에는 이름이 없다 (DD2) — 사용자가 입력한 적 없는
+      // 사실을 마이그레이션이 만들어 내지 않는다.
+      allKindsNull: promoted.every((event) => event.gates.every((gate) => gate.kind === null)),
+      allActualsNull: promoted.every((event) => event.gates.every((gate) => gate.actual === null)),
+      // 종단 관문만 done 을 물려받는다.
+      doneInheritedByTerminal: (() => {
+        const event = byId('v2-done');
+        return Boolean(event && event.gates[event.gates.length - 1].status === 'done');
+      })(),
+      narrowHasOneGate: (() => {
+        const event = byId('v2-single');
+        return Boolean(event && event.gates.length === 1);
+      })(),
+      // 폭 있는 항목은 관문 둘 — DD1의 uniqueDates 가 그렇게 접는다.
+      widthHasTwoGates: (() => {
+        const event = byId('v3-range');
+        return Boolean(event && event.gates.length === 2);
+      })(),
+      projectsOpened: Array.isArray(first.calendarProjects) ? first.calendarProjects.length : null,
+      allUnassigned: promoted.every((event) => event.projectId === null),
+      calendarWidthCacheCleared: widths.calendar === undefined,
+      clockWidthPreserved: widths.clock,
+    },
+    capturedErrors
+  );
+
+  // 축 3 — 잔존 필드가 남아 있고 파생값과 일치한다 (DD4)
+  const min = (event) => event.gates.map((gate) => gate.planned).slice().sort()[0];
+  const max = (event) => event.gates.map((gate) => gate.planned).slice().sort()[event.gates.length - 1];
+  assert(
+    promoted.every((event) => event.startDate === min(event) && event.endDate === max(event)),
+    '파생 필드가 관문과 어긋난 채 커밋됐다 (startDate !== min(planned) 또는 endDate !== max(planned))'
+  );
+  collector.add('migration-v4/03-legacy-fields', {
+    dateEqualsStart: promoted.every((event) => event.date === event.startDate),
+    rangesMatchGates: promoted.every((event) => event.startDate === min(event) && event.endDate === max(event)),
+    promotedRanges: promoted.map((event) => `${event.startDate}~${event.endDate}`),
+    fields: promoted.length > 0 ? Object.keys(promoted[0]).sort().join(',') : '',
+  });
+
+  // 축 2 — 멱등. 사용자가 이름 붙인 관문과 메모가 재실행에서 유실되지 않는다.
+  const withUserWork = promoted.map((event) => ({
+    ...event,
+    note: '사용자 메모',
+    gates: event.gates.map((gate, index) => (index === 0 ? { ...gate, kind: 'dev' } : gate)),
+  }));
+  await chrome.storage.local.set({ calendarEvents: withUserWork, settingsVersion: 3 });
+  await frameWindow.migrateCalendarToV4();
+  await frameWindow.migrateCalendarToV4();
+
+  const second = await chrome.storage.local.get(['settingsVersion', 'calendarEvents']);
+  const reRun = Array.isArray(second.calendarEvents) ? second.calendarEvents : [];
+  collector.add('migration-v4/02-idempotent', {
+    settingsVersion: second.settingsVersion,
+    count: reRun.length,
+    notesPreserved: reRun.every((event) => event.note === '사용자 메모'),
+    namedGatesPreserved: reRun.every((event) => event.gates[0].kind === 'dev'),
+    gateCountsStable: reRun.map((event) => `${event.id}=${event.gates.length}`),
+  });
+
+  // 변환 층위 — 순수 함수를 직접 부른다. 시동 타이밍과 무관하고 spy 보다 강하다
+  // (호출 여부가 아니라 **결과**를 본다).
+  const v2Input = [{ id: 'p', date: '2026-08-06', title: '순수', done: false, createdAt: 1, source: 'local', externalId: null }];
+  const viaPureV3 = frameWindow.promoteEventsToV3(v2Input);
+  const viaPureV4 = frameWindow.promoteEventsToV4(viaPureV3);
+  collector.add('migration-v4/04-pure-functions', {
+    v3PromotesRange: viaPureV3[0].startDate === '2026-08-06' && viaPureV3[0].endDate === '2026-08-06',
+    v3KeepsLegacyDate: viaPureV3[0].date === '2026-08-06',
+    v4MakesGate: viaPureV4[0].gates.length === 1 && viaPureV4[0].gates[0].kind === null,
+    // 입력 배열을 in-place 변형하지 않는다.
+    inputUnchanged: v2Input[0].gates === undefined,
+  });
+
+  // 호출 층위 — DD26의 **셋째 호출 자리**. 결과만 보면 우연히 맞은 경우를 통과시킨다.
+  const spy = spyOn(frameWindow, 'deriveEventRange');
+  try {
+    const many = frameWindow.promoteEventsToV4([
+      { id: 'a', date: '2026-08-01', title: 'a', createdAt: 1 },
+      { id: 'b', startDate: '2026-08-02', endDate: '2026-08-05', title: 'b', createdAt: 2 },
+    ]);
+    assert(
+      spy.calls >= many.length,
+      'promoteEventsToV4가 각 이벤트에 deriveEventRange를 부르지 않았다 (DD26 셋째 호출 자리)'
+    );
+    collector.add('migration-v4/05-derive-call-site', {
+      events: many.length,
+      deriveCallsAtLeastEvents: spy.calls >= many.length,
+    });
+  } finally {
+    spy.restore();
+  }
+
+  // **형제 키에도 같은 가드가 걸린다** (code-review HIGH).
+  //
+  // calendarEvents 는 배열이 아니면 승격을 멈추는데 calendarProjects 는 []로
+  // 덮어썼다. 그러면 loadProjects()의 봉인이 발화할 기회를 잃고, 그 빈 목록을
+  // 근거로 멀쩡한 참조가 전건 강등된다 — 손실이 두 겹이다.
+  const corrupt = await loadApp({
+    settingsVersion: 3,
+    widgetType: 'calendar',
+    mainWidgetEnabled: true,
+    calendarEvents: [],
+    calendarProjects: { not: 'an array' },
+  });
+  const corruptStored = await chrome.storage.local.get(['settingsVersion', 'calendarProjects']);
+  collector.add('migration-v4/06-corrupt-projects-held', {
+    // 승격하지 않는다 — 버전이 오르지 않는다.
+    versionHeld: corruptStored.settingsVersion === 3,
+    // 손상된 값이 그대로 남아 있다. []로 덮이지 않았다.
+    projectsPreserved: !Array.isArray(corruptStored.calendarProjects),
+    // 실패를 조용히 넘기지 않고 화면으로 말한다.
+    noticeShown: (() => {
+      const node = corrupt.document.getElementById('storageNotice');
+      return Boolean(node && !node.hidden);
+    })(),
+  });
+  assert(corruptStored.settingsVersion === 3, '손상된 calendarProjects 위로 v4 승격이 통과했다');
+  assert(
+    !Array.isArray(corruptStored.calendarProjects),
+    'v4 마이그레이션이 손상된 프로젝트를 []로 덮어써 지웠다'
+  );
+
+  progress('calendar v4 migration cases 완료');
+}
+
+/**
+ * v4 등가 판정 — 마이그레이션이 **마감 의미**와 **점유**를 바꾸지 않았는가 (DD15·DD3)
+ *
+ * `snapshot()`은 위젯 기하만 담으므로 마감 의미가 통째로 뒤집혀도 사각형은 움직이지
+ * 않는다. 그 diff 는 DD3를 지키지 못한다 — 그래서 도메인 투영을 따로 만든다.
+ *
+ * **기준값은 렌더에서 뜨지 않고 계산한다.** `loadApp()`은 시동 마이그레이션이 끝난
+ * 뒤에야 반환하므로 "마이그레이션 이전 렌더"는 Task 2 이후 **도달 불가능한 상태**이고,
+ * 그것을 렌더로 뜨려는 설계는 두 투영이 **똑같이 틀린 채로** 맞아떨어져 버그를
+ * 통과시킨다. 그래서 v3의 마감 규칙을 참조 구현으로 박아 둔다.
+ * @param {ReturnType<typeof createCollector>} collector
+ */
+async function runCalendarV4EquivalenceCases(collector) {
+  // 날짜는 전부 todayKey 기준 상대값이다. 고정 날짜는 하네스를 돌리는 날에 따라
+  // 같은 항목이 미래였다가 지연이 되어 케이스를 저절로 뒤집는다.
+  const probe = await loadApp({ settingsVersion: 4, widgetType: 'calendar', mainWidgetEnabled: true, calendarEvents: [] });
+  const todayKey = probe['__newTabApp'].calendarManager.todayKey;
+  const shift = (n) => probe.shiftDateKey(todayKey, n);
+
+  const fixtures = [
+    // DD3-FIXTURE-WIDTH — **폭 있는 항목.** 이 한 줄이 DD3의 실질 판정이다: v3 데이터는
+    // 전부 startDate === endDate 라 폭 없는 항목만으로는 DD3이 정반대로 구현돼도
+    // 통과한다. 모든 관문을 읽는 구현이면 여기서 'overdue'가 나와 즉시 죽는다.
+    { id: 'fx-1', startDate: shift(-3), endDate: shift(0), title: '폭 있음 · 오늘 마감' },
+    // DD3-FIXTURE
+    { id: 'fx-2', startDate: shift(-5), endDate: shift(-1), title: '지연' },
+    // DD3-FIXTURE
+    { id: 'fx-3', startDate: shift(0), endDate: shift(2), title: '진행 중' },
+    // DD3-FIXTURE
+    { id: 'fx-4', startDate: shift(0), endDate: shift(0), title: '오늘 하루' },
+  ].map((f) => ({ ...f, date: f.startDate, done: false, createdAt: 1, updatedAt: 1, source: 'local', externalId: null }));
+
+  // v3 상태로 씨를 뿌리고 시동 마이그레이션을 태운다.
+  const frameWindow = await loadApp({
+    settingsVersion: 3,
+    widgetType: 'calendar',
+    mainWidgetEnabled: true,
+    searchEnabled: true,
+    calendarEvents: fixtures,
+  });
+  const calendar = frameWindow['__newTabApp'].calendarManager;
+
+  // 참조 구현 — v3의 마감 규칙 세 줄 그대로다 (newtab.js:2629-2631 원문).
+  // 다섯 줄을 넘으면 그것은 판정자가 아니라 두 번째 구현이고 DD11이 금지한 것이다.
+  const expectedByV3Rule = (event) => {
+    if (event.endDate < todayKey) return 'overdue';
+    if (event.endDate === todayKey) return 'today';
+    if (event.endDate === frameWindow.shiftDateKey(todayKey, 1)) return 'soon';
+    return '';
+  };
+
+  const after = calendar.getEvents().slice().sort((a, b) => (a.id < b.id ? -1 : 1));
+  const expected = fixtures.slice().sort((a, b) => (a.id < b.id ? -1 : 1)).map(expectedByV3Rule);
+  const meaning = after.map((event) => calendar.getEventDueState(event));
+
+  // 단언 1 — 의미. diff 가 아니라 **단언**이다: 재베이스라인해도 사라지지 않아야 한다.
+  assert(
+    JSON.stringify(meaning) === JSON.stringify(expected),
+    'v4 마이그레이션이 마감 의미를 바꿨다 (after.meaning !== expectedByV3Rule)'
+  );
+
+  // 단언 2 — 점유. 이 플랜은 rebuildIndex()도 getEventsForDate()도 건드리지 않으므로
+  // 점유도 같아야 한다. 실수로 함께 고치면 여기서 죽는다.
+  const spanKeys = [];
+  for (let offset = -7; offset <= 7; offset += 1) spanKeys.push(shift(offset));
+  const bucketKeysBefore = [];
+  const bucketKeysAfter = [];
+  spanKeys.forEach((dateKey) => {
+    fixtures.forEach((fixture) => {
+      if (fixture.startDate <= dateKey && dateKey <= fixture.endDate) {
+        bucketKeysBefore.push(`${dateKey}|${fixture.id}`);
+      }
+    });
+    calendar.getEventsForDate(dateKey).forEach((event) => {
+      bucketKeysAfter.push(`${dateKey}|${event.id}`);
+    });
+  });
+  const setEq = (a, b) => a.length === b.length && a.slice().sort().join(',') === b.slice().sort().join(',');
+  assert(setEq(bucketKeysAfter, bucketKeysBefore), 'v4 마이그레이션이 점유를 바꿨다');
+
+  collector.add('v4-equivalence/01-meaning', {
+    meaning,
+    expected,
+    equal: JSON.stringify(meaning) === JSON.stringify(expected),
+    // 진단용이다. 단언하지 않는다 — 참조 구현이 배너 문구에는 답할 수 없고,
+    // 배너는 마감 상태 다중집합의 순수 함수이므로 위 단언에서 이미 따라 나온다.
+    summaryText: (() => {
+      const node = frameWindow.document.querySelector('.calendar-summary');
+      return node ? node.textContent : null;
+    })(),
+  });
+  collector.add('v4-equivalence/02-occupancy', {
+    before: bucketKeysBefore.length,
+    afterCount: bucketKeysAfter.length,
+    equal: setEq(bucketKeysAfter, bucketKeysBefore),
+  });
+
+  // DD3-FIXTURE — **다섯째 고정 입력: 같은 날짜의 이름 있는 관문 둘.**
+  // 마이그레이션으로는 만들어지지 않는다(uniqueDates 가 접는다). 그래서 v4 이벤트로
+  // 직접 세우고, v3 대응물이 없으므로 위 등가 단언의 입력 집합에는 넣지 않는다.
+  const dualGateEvent = frameWindow.createCalendarEvent({
+    id: 'fx-dual',
+    title: '동점 관문 둘',
+    gates: [
+      { kind: 'dev', planned: shift(-1), actual: null, status: 'pending' },
+      { kind: 'review', planned: shift(-1), actual: null, status: 'pending' },
+    ],
+    createdAt: 1,
+  });
+  assert(
+    dualGateEvent !== null && dualGateEvent.gates.length === 2,
+    'DD25: 같은 날짜의 이름 있는 관문 둘이 접혀 버렸다 — 접기가 너무 많이 접는다'
+  );
+  // 단언 3 — DD25의 동점 면제. getEventDueState 가 planned 하나만 읽으므로 어느 것을
+  // 골라도 답이 같아야 한다. **뒤집기가 이 단언의 전부다**: 순서를 바꿔 답이 달라지면
+  // 판정이 planned 말고 무언가를 함께 읽고 있다는 뜻이고, 그 순간 면제 근거가 사라진다.
+  const reversed = { ...dualGateEvent, gates: dualGateEvent.gates.slice().reverse() };
+  assert(calendar.getEventDueState(dualGateEvent) === 'overdue', 'DD25 동점 면제가 깨졌다');
+  assert(
+    calendar.getEventDueState(reversed) === calendar.getEventDueState(dualGateEvent),
+    'DD25 동점 면제가 깨졌다 — 관문 순서가 마감 판정을 바꾼다'
+  );
+  collector.add('v4-equivalence/03-tie-exemption', {
+    gates: dualGateEvent ? dualGateEvent.gates.length : 0,
+    forward: calendar.getEventDueState(dualGateEvent),
+    reversed: calendar.getEventDueState(reversed),
+    orderIndependent: calendar.getEventDueState(reversed) === calendar.getEventDueState(dualGateEvent),
+  });
+
+  progress('calendar v4 equivalence cases 완료');
+}
+
+/**
+ * 프로젝트 컬렉션 — 삭제 시 강등 / 기본값 / 가져오기 참조 무결성 (DD7·DD27·DD28)
+ * @param {ReturnType<typeof createCollector>} collector
+ */
+async function runCalendarProjectCases(collector) {
+  const frameWindow = await loadApp({
+    settingsVersion: 4,
+    widgetType: 'calendar',
+    mainWidgetEnabled: true,
+    searchEnabled: true,
+    calendarEvents: [],
+    calendarProjects: [],
+  });
+  const calendar = frameWindow['__newTabApp'].calendarManager;
+  const todayKey = calendar.todayKey;
+
+  await calendar.addProject({ name: '프로젝트 A' });
+  const projectId = calendar.projects[0].id;
+  await calendar.setLastUsedProjectId(projectId);
+  await calendar.addEvent({ startDate: todayKey, endDate: todayKey, title: '소속 있음', projectId });
+  await calendar.addEvent({ startDate: todayKey, endDate: todayKey, title: '무소속' });
+
+  const beforeDelete = {
+    events: calendar.getEvents().length,
+    defaultProject: calendar.defaultProjectId(),
+  };
+
+  // 두 경로(삭제·가져오기)가 **같은 함수**를 부르는지 본다 (DD24의 호출 층위).
+  const reconcileSpy = spyOn(frameWindow, 'reconcileProjectRefs');
+  let deleteCalls = 0;
+  let importCalls = 0;
+  try {
+    await calendar.removeProject(projectId);
+    deleteCalls = reconcileSpy.calls;
+
+    const foreign = frameWindow.sanitizeImportedEvents([
+      { startDate: todayKey, endDate: todayKey, title: '남의 파일 1', projectId: 'foreign-1' },
+      { startDate: todayKey, endDate: todayKey, title: '남의 파일 2', projectId: 'foreign-2' },
+    ]);
+    await calendar.addProject({ name: '로컬 프로젝트' });
+    const localId = calendar.projects[0].id;
+    const before = reconcileSpy.calls;
+    await calendar.replaceEvents(foreign);
+    importCalls = reconcileSpy.calls - before;
+
+    const afterImport = await chrome.storage.local.get(['calendarEvents', 'calendarProjects']);
+    collector.add('project/02-import-refs', {
+      // 전건이 무소속으로 내려앉되 **이벤트 수가 줄지 않는다** (DD7).
+      importedCount: afterImport.calendarEvents.length,
+      allDowngraded: afterImport.calendarEvents.every((event) => event.projectId === null),
+      // replaceEvents()가 calendarProjects 를 건드리지 않는다는 사실이 이 단언으로 고정된다.
+      localProjectsSurvived: afterImport.calendarProjects.length,
+      localProjectStillThere: afterImport.calendarProjects.some((project) => project.id === localId),
+    });
+    assert(
+      afterImport.calendarEvents.length === 2,
+      '가져오기가 이벤트를 지웠다 — 강등만 해야 한다 (DD7)'
+    );
+  } finally {
+    reconcileSpy.restore();
+  }
+
+  const afterDelete = await chrome.storage.local.get(['calendarEvents']);
+  collector.add('project/01-delete-downgrades', {
+    eventsBefore: beforeDelete.events,
+    // 프로젝트를 지워도 이벤트는 살아 있고 참조만 내려간다 (DD7) — 재생 불가 데이터다.
+    eventsAfter: afterDelete.calendarEvents.length,
+    defaultBefore: beforeDelete.defaultProject === projectId,
+    // 그 프로젝트를 지우면 기본값이 무소속으로 떨어진다 (UI8).
+    defaultAfter: calendar.defaultProjectId(),
+    bothPathsCallReconcile: deleteCalls >= 1 && importCalls >= 1,
+  });
+  assert(deleteCalls >= 1, '삭제 경로가 reconcileProjectRefs 를 부르지 않았다 (DD28)');
+  assert(importCalls >= 1, '가져오기 경로가 reconcileProjectRefs 를 부르지 않았다 (DD28)');
+
+  // DD27a — 목록을 읽지 못한 상태에서 프로젝트 쓰기가 잠긴다.
+  const sealed = await loadApp({
+    settingsVersion: 4,
+    widgetType: 'calendar',
+    mainWidgetEnabled: true,
+    calendarEvents: [],
+    // id 없는 행. 생성 게이트에 맡기면 새 id 를 달고 되살아나 봉인이 발화하지 않는다.
+    calendarProjects: [{ name: 'id 없음' }],
+  });
+  const sealedCalendar = sealed['__newTabApp'].calendarManager;
+  const storedBefore = JSON.stringify((await chrome.storage.local.get(['calendarProjects'])).calendarProjects);
+  const writeBlocked = (await sealedCalendar.persistProjects([{ id: 'x', name: '새 프로젝트' }])) === false;
+  const storedAfter = JSON.stringify((await chrome.storage.local.get(['calendarProjects'])).calendarProjects);
+  collector.add('project/03-read-failure-seal', {
+    projectsLoadFailed: sealedCalendar.projectsLoadFailed,
+    writeBlocked,
+    storageUntouched: storedBefore === storedAfter,
+    noticeShown: (() => {
+      const node = sealed.document.getElementById('storageNotice');
+      return Boolean(node && !node.hidden && node.textContent.indexOf('프로젝트') !== -1);
+    })(),
+  });
+  assert(sealedCalendar.projectsLoadFailed === true, '손상된 프로젝트 행을 읽고도 봉인이 서지 않았다 (DD27a)');
+  assert(writeBlocked, '프로젝트 목록을 읽지 못한 상태에서 쓰기가 통과했다 (DD27a)');
+
+  // **상한 절단도 "온전히 읽지 못한 것"이다** (code-review MEDIUM).
+  //
+  // dropped 와 같은 취급을 하지 않으면 51번째 이후 프로젝트가 조용히 사라진 채
+  // 봉인이 서지 않고, 그 목록을 아는 프로젝트 전부로 믿은 reconcileProjectRefs()가
+  // 그것을 가리키던 이벤트를 무소속으로 내린다.
+  //
+  // 51 은 MAX_PROJECTS(50) + 1 이다. 그 상수는 const 라 전역 객체에 붙지 않아
+  // 여기서 읽을 수 없다 — 상수를 고치면 이 줄도 함께 고쳐야 한다.
+  const overflowRows = [];
+  for (let i = 0; i < 51; i += 1) overflowRows.push({ id: `p-${i}`, name: `프로젝트 ${i}` });
+
+  const overflow = await loadApp({
+    settingsVersion: 4,
+    widgetType: 'calendar',
+    mainWidgetEnabled: true,
+    calendarEvents: [],
+    calendarProjects: overflowRows,
+  });
+  const overflowCalendar = overflow['__newTabApp'].calendarManager;
+  const overflowStoredBefore = JSON.stringify((await chrome.storage.local.get(['calendarProjects'])).calendarProjects);
+  const overflowBlocked = (await overflowCalendar.persistProjects([{ id: 'x', name: '새 프로젝트' }])) === false;
+  const overflowStoredAfter = JSON.stringify((await chrome.storage.local.get(['calendarProjects'])).calendarProjects);
+
+  collector.add('project/04-truncation-seal', {
+    loadedCount: overflowCalendar.projects.length,
+    projectsLoadFailed: overflowCalendar.projectsLoadFailed,
+    writeBlocked: overflowBlocked,
+    storageUntouched: overflowStoredBefore === overflowStoredAfter,
+  });
+  assert(
+    overflowCalendar.projectsLoadFailed === true,
+    '상한 절단이 봉인을 세우지 않았다 — 잘린 프로젝트를 가리키던 이벤트가 강등된다'
+  );
+  assert(overflowBlocked, '상한 절단 상태에서 프로젝트 쓰기가 통과했다');
+
+  progress('calendar project cases 완료');
+}
+
+/**
+ * 관문 편집 — 호출 층위 + 결과 층위 (DD24·DD25·DD26·DD5a)
+ * @param {ReturnType<typeof createCollector>} collector
+ */
+async function runCalendarGateCases(collector) {
+  const frameWindow = await loadApp({
+    settingsVersion: 4,
+    widgetType: 'calendar',
+    mainWidgetEnabled: true,
+    searchEnabled: true,
+    calendarEvents: [],
+    calendarProjects: [],
+  });
+  const calendar = frameWindow['__newTabApp'].calendarManager;
+  const todayKey = calendar.todayKey;
+  const shift = (n) => frameWindow.shiftDateKey(todayKey, n);
+
+  await calendar.addEvent({ startDate: shift(1), endDate: shift(1), title: '관문 편집 대상' });
+  const eventId = calendar.getEvents()[0].id;
+  const gateOf = (index) => calendar.getEvents()[0].gates[index];
+
+  // **호출 층위** — 셋 각각에 대해 deriveEventRange 호출 수가 1 이상인지 본다.
+  // 결과만 보면 우연히 맞은 경우를 통과시킨다 (DD24).
+  const perOp = {};
+  for (const op of ['add', 'update', 'remove']) {
+    const spy = spyOn(frameWindow, 'deriveEventRange');
+    try {
+      if (op === 'add') await calendar.addGate(eventId, { kind: 'dev', planned: shift(3), status: 'pending' });
+      if (op === 'update') await calendar.updateGate(eventId, gateOf(0).id, { status: 'done', actual: shift(0) });
+      if (op === 'remove') await calendar.removeGate(eventId, gateOf(1).id);
+      perOp[op] = spy.calls;
+      assert(spy.calls >= 1, `${op}Gate 가 deriveEventRange 를 부르지 않았다 (DD26 둘째 호출 자리)`);
+    } finally {
+      spy.restore();
+    }
+  }
+  collector.add('gate/01-derive-call-sites', perOp);
+
+  // **DD25의 집행이 실제로 여기서 일어나는가.** 편집기가 아니라 createCalendarEvent 가
+  // 막는다는 것이 DD25의 결론이고, addGate 는 그 게이트를 **지나야** 한다.
+  await calendar.addEvent({ startDate: shift(5), endDate: shift(5), title: 'DD25 대상' });
+  const dd25Id = calendar.getEvents().find((event) => event.title === 'DD25 대상').id;
+  const gatesOf = (id) => calendar.getEvents().find((event) => event.id === id).gates;
+
+  const beforeAnon = gatesOf(dd25Id).length;
+  await calendar.addGate(dd25Id, { kind: null, planned: shift(5), status: 'pending' });
+  const afterAnon = gatesOf(dd25Id).length;
+
+  await calendar.addGate(dd25Id, { kind: 'dev', planned: shift(5), status: 'pending' });
+  await calendar.addGate(dd25Id, { kind: 'review', planned: shift(5), status: 'pending' });
+  const afterNamed = gatesOf(dd25Id).length;
+
+  collector.add('gate/02-dd25-folding', {
+    // (a) 같은 날짜의 이름 없는 관문은 늘지 않는다
+    anonymousFolded: afterAnon === beforeAnon,
+    // (b) 같은 날짜의 이름 있는 관문 둘은 **둘 다** 늘어난다. (a)만 두면 이름 있는
+    //     관문까지 접어 버리는 회귀가 통과한다.
+    namedNotFolded: afterNamed === afterAnon + 2,
+    counts: [beforeAnon, afterAnon, afterNamed],
+  });
+  assert(afterAnon === beforeAnon, 'DD25: 같은 날짜의 이름 없는 관문이 접히지 않았다');
+  assert(afterNamed === afterAnon + 2, 'DD25: 이름 있는 관문까지 접혔다 — 접기가 너무 많이 접는다');
+
+  // **마지막 관문은 지워지지 않는다** (DD5).
+  await calendar.addEvent({ startDate: shift(7), endDate: shift(7), title: '관문 하나' });
+  const singleId = calendar.getEvents().find((event) => event.title === '관문 하나').id;
+  const singleGateId = gatesOf(singleId)[0].id;
+  const storedBefore = JSON.stringify((await chrome.storage.local.get(['calendarEvents'])).calendarEvents);
+  const removeRefused = (await calendar.removeGate(singleId, singleGateId)) === false;
+  const storedAfter = JSON.stringify((await chrome.storage.local.get(['calendarEvents'])).calendarEvents);
+  collector.add('gate/03-last-gate-kept', {
+    removeRefused,
+    storageUntouched: storedBefore === storedAfter,
+    stillHasGate: gatesOf(singleId).length === 1,
+  });
+  assert(removeRefused, 'removeGate 가 마지막 관문을 지웠다 — 빈 관문 집합은 존재할 수 없다 (DD5)');
+  assert(storedBefore === storedAfter, '마지막 관문 삭제 시도가 저장소를 건드렸다');
+
+  // **done 파생의 세 분기** (DD5a). (c)가 빠지면 종단 관문 규칙으로 구현해도 (a)·(b)는 통과한다.
+  await calendar.addEvent({ startDate: shift(9), endDate: shift(9), title: 'done 파생' });
+  const doneId = calendar.getEvents().find((event) => event.title === 'done 파생').id;
+  await calendar.addGate(doneId, { kind: 'prod', planned: shift(11), status: 'pending' });
+  const branchA = calendar.getEvents().find((event) => event.id === doneId).done;
+
+  for (const gate of gatesOf(doneId).slice()) {
+    await calendar.updateGate(doneId, gate.id, { status: 'done', actual: shift(10) });
+  }
+  const branchB = calendar.getEvents().find((event) => event.id === doneId).done;
+
+  for (const gate of gatesOf(doneId).slice()) {
+    await calendar.updateGate(doneId, gate.id, { status: 'dropped' });
+  }
+  const branchC = calendar.getEvents().find((event) => event.id === doneId).done;
+
+  collector.add('gate/04-done-derivation', { branchA, branchB, branchC });
+  assert(branchA === false, 'DD5a (a): 살아 있는 관문 하나가 pending 인데 완료로 판정됐다');
+  assert(branchB === true, 'DD5a (b): 살아 있는 관문이 전부 done 인데 미완료로 판정됐다');
+  assert(branchC === true, 'DD5a (c): 관문이 전부 dropped 인데 완료로 떨어지지 않았다 — 범위를 줄인 작업이 영영 끝나지 않는다');
+
+  // **파생 범위는 dropped 를 포함한다** (DD5a) — 계획은 남는다. 그리고 관문 하나를
+  // 옮겨도 나머지는 움직이지 않는다 (UI6의 기계적 단언).
+  await calendar.addEvent({ startDate: shift(13), endDate: shift(13), title: '범위 파생' });
+  const rangeId = calendar.getEvents().find((event) => event.title === '범위 파생').id;
+  await calendar.addGate(rangeId, { kind: 'stg', planned: shift(15), status: 'pending' });
+  await calendar.addGate(rangeId, { kind: 'prod', planned: shift(17), status: 'pending' });
+  const othersBefore = gatesOf(rangeId)
+    .filter((gate) => gate.kind !== 'stg')
+    .map((gate) => `${gate.kind}:${gate.planned}`)
+    .sort();
+  const stgId = gatesOf(rangeId).find((gate) => gate.kind === 'stg').id;
+  await calendar.updateGate(rangeId, stgId, { planned: shift(16) });
+  const othersAfter = gatesOf(rangeId)
+    .filter((gate) => gate.kind !== 'stg')
+    .map((gate) => `${gate.kind}:${gate.planned}`)
+    .sort();
+
+  const prodId = gatesOf(rangeId).find((gate) => gate.kind === 'prod').id;
+  await calendar.updateGate(rangeId, prodId, { status: 'dropped' });
+  const withDropped = calendar.getEvents().find((event) => event.id === rangeId);
+
+  collector.add('gate/05-range-and-no-reflow', {
+    // 관문 하나를 옮겨도 나머지는 그대로다 (UI6 — 자동 재배치를 하지 않는다).
+    othersUnmoved: JSON.stringify(othersBefore) === JSON.stringify(othersAfter),
+    movedTo: gatesOf(rangeId).find((gate) => gate.kind === 'stg').planned,
+    // dropped 관문도 파생 범위에 남는다 — 계획은 남고 마감 판정에서만 빠진다.
+    endDateKeepsDropped: withDropped.endDate === shift(17),
+    dueStateIgnoresDropped: calendar.getEventDueState(withDropped),
+  });
+  assert(
+    JSON.stringify(othersBefore) === JSON.stringify(othersAfter),
+    'UI6: 관문 하나를 옮겼는데 다른 관문이 함께 움직였다'
+  );
+  assert(withDropped.endDate === shift(17), 'DD5a: dropped 관문이 파생 범위에서 빠졌다 — 계획은 남아야 한다');
+
+  // **상한 위반은 기존 관문을 몰살하지 않는다** (code-review CRITICAL).
+  //
+  // normalizeGates 의 기준점이 입력에서 나오므로, 기존 관문보다 366일 이른 관문이
+  // 하나 들어오면 기존 관문 전부가 상한 밖으로 밀려 조용히 사라졌고 addGate 는
+  // 그것을 커밋하고 성공을 돌려줬다. 관문 날짜 칸에 min/max 가 없으므로 **연도
+  // 오타 한 번**으로 도달한다. 이 케이스가 없으면 같은 회귀가 그대로 되돌아온다.
+  await calendar.addEvent({ startDate: shift(20), endDate: shift(20), title: '상한 축출' });
+  const capId = calendar.getEvents().find((event) => event.title === '상한 축출').id;
+  await calendar.addGate(capId, { kind: 'prod', planned: shift(60), status: 'pending' });
+
+  const capBefore = gatesOf(capId).map((gate) => gate.planned).slice().sort();
+  const capStoredBefore = JSON.stringify((await chrome.storage.local.get(['calendarEvents'])).calendarEvents);
+
+  // 앞뒤 **양쪽**을 잰다. 뒤만 재면 기준점이 움직이는 축(= 실제 회귀)이 빠진다.
+  const pastRefused = (await calendar.addGate(capId, { kind: 'dev', planned: shift(-900), status: 'pending' })) === false;
+  const futureRefused = (await calendar.addGate(capId, { kind: 'dev', planned: shift(900), status: 'pending' })) === false;
+
+  const capAfter = gatesOf(capId).map((gate) => gate.planned).slice().sort();
+  const capStoredAfter = JSON.stringify((await chrome.storage.local.get(['calendarEvents'])).calendarEvents);
+  collector.add('gate/06-range-cap-refuses', {
+    pastRefused,
+    futureRefused,
+    gatesUnchanged: JSON.stringify(capBefore) === JSON.stringify(capAfter),
+    storageUntouched: capStoredBefore === capStoredAfter,
+    counts: [capBefore.length, capAfter.length],
+  });
+  assert(pastRefused, '상한을 넘는 이른 관문이 거절되지 않았다 — 기존 관문이 조용히 사라진다');
+  assert(futureRefused, '상한을 넘는 늦은 관문이 거절되지 않았다');
+  assert(JSON.stringify(capBefore) === JSON.stringify(capAfter), '거절된 추가가 기존 관문을 바꿨다');
+  assert(capStoredBefore === capStoredAfter, '거절된 추가가 저장소를 건드렸다');
+
+  // **익명 관문 셋은 범위 둘로 재구성될 수 없다** (code-review HIGH).
+  //
+  // 편집기의 종류 기본값이 '이름 없음'이라 사용자가 직접 세운 관문도 전부
+  // kind:null · pending · actual:null 이다. eventHasUserGateWork 가 그것을 거짓으로
+  // 답하면 모달의 날짜 칸이 편집 가능하게 남고, **아무것도 고치지 않고 저장만
+  // 눌러도** 관문이 [startDate, endDate] 둘로 재합성되어 가운데가 사라진다.
+  await calendar.addEvent({ startDate: shift(30), endDate: shift(30), title: '익명 셋' });
+  const anonId = calendar.getEvents().find((event) => event.title === '익명 셋').id;
+  await calendar.addGate(anonId, { kind: null, planned: shift(35), status: 'pending' });
+  await calendar.addGate(anonId, { kind: null, planned: shift(40), status: 'pending' });
+
+  const anonEvent = calendar.getEvents().find((event) => event.id === anonId);
+  const anonUntouched = anonEvent.gates.every(
+    (gate) => gate.kind === null && gate.status === 'pending' && gate.actual === null
+  );
+  const anonDerived = frameWindow.eventHasUserGateWork(anonEvent);
+
+  // 간편 편집(gates 키를 아예 넘기지 않는 경로)은 관문을 보존해야 한다.
+  await calendar.updateEvent(anonId, {
+    startDate: anonEvent.startDate,
+    endDate: anonEvent.endDate,
+    title: '익명 셋',
+  });
+  const afterPlainEdit = gatesOf(anonId).length;
+
+  collector.add('gate/07-anonymous-three-kept', {
+    gates: anonEvent.gates.length,
+    allUntouched: anonUntouched,
+    treatedAsDerived: anonDerived,
+    gatesAfterPlainEdit: afterPlainEdit,
+  });
+  assert(anonEvent.gates.length === 3, '익명 관문 셋이 서지 않았다 — 이 케이스의 전제가 깨졌다');
+  assert(anonUntouched, '전제가 깨졌다: 관문이 전부 이름 없는 pending 이어야 한다');
+  assert(anonDerived, '익명 관문 셋인데 파생 범위로 보지 않는다 — 모달 저장이 가운데 관문을 지운다');
+  assert(afterPlainEdit === 3, '간편 편집이 관문을 재구성해 가운데 관문을 지웠다');
+
+  progress('calendar gate cases 완료');
+}
+
+/**
  * 범위 이벤트 — 월 경계 / 범위 상한 / 메모 절단 / 앞뒤 역전
  * @param {ReturnType<typeof createCollector>} collector
  */
@@ -732,11 +1423,12 @@ async function runSanitizeCases(collector) {
   const frameWindow = await loadApp({ settingsVersion: 2 });
   const { sanitizeImportedEvents } = frameWindow;
 
+  // **탈락 항목을 이 배치에서 뺐다.** Task 1이 "검증 탈락이 하나라도 있으면 배치
+  // 전체를 거절"로 바꿨으므로, 섞어 두면 이 케이스가 던져 죽는다. 이 키가 재던
+  // 것(화이트리스트 복사·프로토타입 청결·비배열 거절)은 그대로 재고, 탈락 항목의
+  // 처리는 아래 새 키 sanitize/batch-reject 가 진다.
   const malicious = JSON.parse(
-    '[{"__proto__":{"polluted":1},"date":"2026-08-06","title":"정상","evil":"drop me"},' +
-      '{"date":"2026-02-30","title":"존재하지 않는 날짜"},' +
-      '{"date":"bad","title":"형식 오류"},' +
-      '{"date":"2026-08-07","title":""}]'
+    '[{"__proto__":{"polluted":1},"date":"2026-08-06","title":"정상","evil":"drop me"}]'
   );
   const sanitized = sanitizeImportedEvents(malicious);
 
@@ -786,6 +1478,68 @@ async function runSanitizeCases(collector) {
       return Boolean(event && event.startDate === '2026-10-05' && event.endDate === '2026-10-05');
     })(),
     fields: v3Sanitized.length > 0 ? Object.keys(v3Sanitized[0]).sort().join(',') : '',
+  });
+
+  // **배치 전체 거절** (Task 1). 부분만 들여오면 사용자는 무엇이 빠졌는지 모른 채
+  // "가져왔다"고 믿는다. 던지면 replaceEvents()에 도달하지 않으므로 저장소는
+  // 손대지 않은 채 남는다.
+  const rejects = (payload) => {
+    try {
+      sanitizeImportedEvents(payload);
+      return false;
+    } catch (_) {
+      return true;
+    }
+  };
+  collector.add('sanitize/batch-reject', {
+    oneBadDateRejectsAll: rejects(
+      JSON.parse('[{"date":"2026-08-06","title":"정상"},{"date":"2026-02-30","title":"존재하지 않는 날짜"}]')
+    ),
+    oneEmptyTitleRejectsAll: rejects(
+      JSON.parse('[{"date":"2026-08-06","title":"정상"},{"date":"2026-08-07","title":""}]')
+    ),
+    allValidStillPasses: sanitizeImportedEvents(
+      JSON.parse('[{"date":"2026-08-06","title":"a"},{"date":"2026-08-07","title":"b"}]')
+    ).length,
+  });
+
+  // **봉투 화이트리스트** (Task 1). 아는 값 둘을 열거하고 나머지를 전부 거절한다.
+  collector.add('sanitize/envelope', {
+    bareArrayIsLegacy: sanitizeImportedEvents(JSON.parse('[{"date":"2026-08-06","title":"a"}]')).length,
+    v4EnvelopeAccepted: sanitizeImportedEvents(
+      JSON.parse('{"version":4,"events":[{"title":"a","gates":[{"planned":"2026-08-06"}]}]}')
+    ).length,
+    rejectsVersion3: rejects(JSON.parse('{"version":3,"events":[]}')),
+    rejectsVersion999: rejects(JSON.parse('{"version":999,"events":[]}')),
+    rejectsMissingVersion: rejects(JSON.parse('{"events":[]}')),
+    // 엄격 비교다 — 문자열 "4"는 통과하지 못한다.
+    rejectsStringVersion: rejects(JSON.parse('{"version":"4","events":[]}')),
+    rejectsNonArrayEvents: rejects(JSON.parse('{"version":4,"events":"nope"}')),
+    // v4 봉투인데 gates 가 없으면 레거시가 아니라 손상이다.
+    rejectsV4WithoutGates: rejects(
+      JSON.parse('{"version":4,"events":[{"startDate":"2026-08-06","title":"a"}]}')
+    ),
+  });
+
+  // **관문 배열 안쪽의 prototype pollution** (Task 1 Validate).
+  // 화이트리스트 복사는 gates 항목에도 같은 방식으로 걸린다.
+  const gatePollution = sanitizeImportedEvents(
+    JSON.parse(
+      '{"version":4,"events":[{"title":"관문 오염","gates":[' +
+        '{"__proto__":{"gatePolluted":1},"planned":"2026-08-06","kind":"dev","evil":"drop me"}]}]}'
+    )
+  );
+  collector.add('sanitize/gate-pollution', {
+    kept: gatePollution.length,
+    gateKeys: gatePollution.length > 0 ? Object.keys(gatePollution[0].gates[0]).sort().join(',') : '',
+    prototypeClean: {}.gatePolluted === undefined,
+    // 목록 밖의 kind 와 status 는 조용히 기본값으로 떨어진다 (화이트리스트).
+    unknownKindFallsBack: (() => {
+      const out = sanitizeImportedEvents(
+        JSON.parse('{"version":4,"events":[{"title":"x","gates":[{"planned":"2026-08-06","kind":"evil","status":"weird"}]}]}')
+      );
+      return out[0].gates[0].kind === null && out[0].gates[0].status === 'pending';
+    })(),
   });
 
   progress('sanitize cases 완료');
@@ -882,7 +1636,12 @@ async function runLoadFailureCases(collector) {
 
   // 가져오기는 **통과해야** 한다. 읽기가 영구히 깨졌을 때 유일한 복구 수단이다.
   const recovered = await calendar.replaceEvents([
-    frameWindow.createCalendarEvent({ startDate: todayKey, endDate: todayKey, title: '복구본' }),
+    // 생성 게이트의 기본값이 false 이므로(Task 1) v3 모양 입력에는 명시적으로 넘긴다.
+    // 넘기지 않으면 null 이 만들어져 복구본 대신 빈 항목이 커밋된다.
+    frameWindow.createCalendarEvent(
+      { startDate: todayKey, endDate: todayKey, title: '복구본' },
+      { allowLegacyGateSynthesis: true }
+    ),
   ]);
   assert(recovered === true, '가져오기(전체 교체)는 loadFailed 잠금을 통과해야 한다');
   assert(calendar.loadFailed === false, '가져오기가 성공하면 잠금이 풀려야 한다');
@@ -998,6 +1757,11 @@ async function runAll() {
     await runDynamicCases(collector);
     await runMigrationCases(collector);
     await runCalendarV3MigrationCases(collector);
+    // 등가 판정은 마이그레이션이 검증된 다음에만 의미가 있다.
+    await runCalendarV4MigrationCases(collector);
+    await runCalendarV4EquivalenceCases(collector);
+    await runCalendarProjectCases(collector);
+    await runCalendarGateCases(collector);
     await runRangeCases(collector);
     await runSummaryCases(collector);
     await runDateKeyCases(collector);
@@ -1022,6 +1786,41 @@ async function runAll() {
  * @param {Record<string, unknown>} current
  * @param {Record<string, unknown>|null} baseline
  */
+/**
+ * 키 순서에 무관한 직렬화 — 비교 전용
+ *
+ * `chrome.storage.local` 은 값을 되돌려줄 때 객체 키를 알파벳순으로 정규화한다.
+ * 베이스라인은 그 저장소를 거쳐 오고 현재 결과는 방금 만든 객체이므로, 순진한
+ * `JSON.stringify` 비교는 **코드가 하나도 안 바뀌어도** 전 케이스를 "차이"로 답한다.
+ * 실측했다 — 변경 전 트리에서 capture → compare 를 같은 프로필로 돌리면 118건 중
+ * 117건이 차이로 뜨고 그중 87건은 값이 완전히 같다.
+ *
+ * 그 상태의 "차이 0" 은 참이 될 수 없는 판정이고, **없는 게이트와 구별되지 않는다.**
+ * 그래서 비교만 정규화한다 — 저장되는 값도 내보내는 파일도 그대로다.
+ *
+ * 배열 순서는 **정렬하지 않는다.** 순서가 의미를 갖는 투영(관문 목록 · 승격 범위
+ * 목록)이 있고, 그 순서가 바뀌는 것은 실제 회귀다.
+ * @param {unknown} value
+ * @returns {string}
+ */
+function stableStringify(value) {
+  const canon = (node) => {
+    if (Array.isArray(node)) return node.map(canon);
+    if (node && typeof node === 'object') {
+      /** @type {Record<string, unknown>} */
+      const out = {};
+      Object.keys(node)
+        .sort()
+        .forEach((key) => {
+          out[key] = canon(node[key]);
+        });
+      return out;
+    }
+    return node;
+  };
+  return JSON.stringify(canon(value));
+}
+
 function renderResults(current, baseline) {
   if (!resultsBody || !summaryElement) return;
   resultsBody.textContent = '';
@@ -1031,8 +1830,9 @@ function renderResults(current, baseline) {
   let errorCount = 0;
 
   names.forEach((name) => {
-    const currentJson = JSON.stringify(current[name] ?? null);
-    const baselineJson = baseline ? JSON.stringify(baseline[name] ?? null) : null;
+    // 키 순서를 정규화해 비교한다 (위 stableStringify 머리말 참고).
+    const currentJson = stableStringify(current[name] ?? null);
+    const baselineJson = baseline ? stableStringify(baseline[name] ?? null) : null;
 
     const hasErrors = currentJson.includes('"errors"');
     if (hasErrors) errorCount += 1;
@@ -1120,7 +1920,12 @@ document.getElementById('runBaseline')?.addEventListener('click', async () => {
   setControlsDisabled(true);
   try {
     const results = await runAll();
-    await chrome.storage.local.set({ [BASELINE_KEY]: results });
+    // 두 키를 한 번에 커밋한다. 나누면 사이에서 죽었을 때 베이스라인만 남고
+    // 그 실행이 깨끗했는지는 사라진 반쪽 상태가 된다.
+    await chrome.storage.local.set({
+      [BASELINE_KEY]: results,
+      [BASELINE_META_KEY]: { assertFailures: assertFailures.length },
+    });
     renderResults(results, null);
   } catch (error) {
     if (summaryElement) {
@@ -1160,5 +1965,48 @@ document.getElementById('clearBaseline')?.addEventListener('click', async () => 
   if (summaryElement) {
     summaryElement.className = '';
     summaryElement.textContent = '베이스라인 삭제됨';
+  }
+});
+
+/**
+ * 베이스라인 내보내기 — 앵커 검사가 실재하게 만드는 유일한 수단
+ *
+ * 베이스라인은 chrome.storage.local 안에만 있어 파일이 없다. 파일이 없으면
+ * shasum -c가 "no such file"로 죽고, 그것은 실행될 수 없는 검사를 판정으로
+ * 적어 둔 것과 같다.
+ *
+ * **봉투로 내린다** — meta.assertFailures가 베이스라인 옆에 함께 실린다.
+ * 잡는 것은 "단언이 깨진 실행에서 베이스라인을 떴다" 하나이고, 손으로 고친
+ * JSON은 잡지 못한다. 닫히지 않는 것과 비어 있는 것은 다르다.
+ */
+document.getElementById('exportBaseline')?.addEventListener('click', async () => {
+  const stored = await chrome.storage.local.get([BASELINE_KEY, BASELINE_META_KEY]);
+  if (!stored[BASELINE_KEY]) {
+    if (summaryElement) {
+      summaryElement.className = 'fail';
+      summaryElement.textContent = '베이스라인이 없습니다. "베이스라인 캡처"를 먼저 누르세요.';
+    }
+    return;
+  }
+
+  const envelope = {
+    meta: stored[BASELINE_META_KEY] || { assertFailures: null },
+    baseline: stored[BASELINE_KEY],
+  };
+  const blob = new Blob([JSON.stringify(envelope, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'work-calendar-m2.baseline.json';
+  link.click();
+  URL.revokeObjectURL(url);
+
+  if (summaryElement) {
+    const n = envelope.meta.assertFailures;
+    summaryElement.className = n === 0 ? '' : 'fail';
+    summaryElement.textContent =
+      n === 0
+        ? 'work-calendar-m2.baseline.json 내려받음 (단언 실패 0건)'
+        : `work-calendar-m2.baseline.json 내려받음 — 단언 실패 ${n === null ? '수 미상' : n + '건'}. 이 파일을 앵커로 쓰지 마세요.`;
   }
 });

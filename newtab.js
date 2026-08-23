@@ -15,10 +15,20 @@
  * 두 마이그레이션은 각자의 가드를 쓴다. v2가 이 상수를 그대로 쓰면 v2 실행만으로
  * 버전이 3이 되어 v3 마이그레이션이 영영 건너뛰어진다.
  */
-const SETTINGS_VERSION = 3;
+const SETTINGS_VERSION = 4;
 
 /** migrateSettingsToV2 전용 가드 값 */
 const SETTINGS_VERSION_V2 = 2;
+
+/**
+ * migrateCalendarToV3 전용 가드 값 (DD10)
+ *
+ * v3의 가드는 원래 `SETTINGS_VERSION`을 읽었다. 상수만 4로 올리면 v3 마이그레이션이
+ * **영영 실행되지 않고**, v2 저장소를 가진 브라우저는 승격 없이 v4 코드를 만난다.
+ * 위 주석이 v2에서 이미 겪고 기록해 둔 바로 그 함정이다 — 셋을 각각 자기 상수로
+ * 가드해 독립적으로 멱등이 되게 한다.
+ */
+const SETTINGS_VERSION_V3 = 3;
 
 /** 이벤트 제목 최대 길이 */
 const MAX_TITLE_LENGTH = 500;
@@ -46,6 +56,40 @@ const IMPORT_ITEM_OVERHEAD_CHARS = 120;
 
 /** 중요도 열거값. 이 목록 밖의 값은 전부 'normal'로 떨어진다 */
 const PRIORITIES = ['low', 'normal', 'high'];
+
+/**
+ * 관문 종류 프리셋 (DD12)
+ *
+ * UI9가 다섯을 최소 기준으로 두되 확정하지 말라고 했다. 확정하지 않는 방법은
+ * 편집 UI를 여는 것이 아니라 이 한 줄로 두어 고치기 싸게 만드는 것이다.
+ * 이 목록 밖의 값과 `null`은 전부 `null`(이름 없는 관문)로 떨어진다.
+ */
+const GATE_KINDS = ['dev', 'review', 'stg', 'prod', 'monitor'];
+
+/** 관문 상태 열거값. 이 목록 밖의 값은 전부 'pending'으로 떨어진다 (DD5) */
+const GATE_STATUSES = ['pending', 'done', 'dropped'];
+
+/**
+ * 관문 액션의 짝 (포커스 복원용)
+ *
+ * 누르면 그 버튼이 짝으로 바뀐다. 목록을 통째로 다시 그린 뒤 같은 자리를 찾으려면
+ * 무엇으로 바뀌는지 알아야 한다. `remove` 는 짝이 없다 — 그 줄 자체가 사라진다.
+ */
+const GATE_ACTION_PAIRS = { done: 'undone', undone: 'done', drop: 'restore', restore: 'drop' };
+
+/**
+ * 이벤트 하나가 가질 수 있는 최대 관문 수
+ *
+ * 프리셋 다섯에 사용자가 이름 없는 관문을 더할 여지를 둔 값이다. 상한이 필요한
+ * 이유는 가져오기가 남의 파일에서 `gates` 배열을 그대로 받기 때문이다(DD28).
+ */
+const MAX_GATES_PER_EVENT = 12;
+
+/** 프로젝트 컬렉션 상한 */
+const MAX_PROJECTS = 50;
+
+/** 프로젝트 이름 최대 길이 */
+const MAX_PROJECT_NAME_CHARS = 60;
 
 /** 'YYYY-MM-DD' 날짜 키 형식 */
 const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -209,7 +253,27 @@ const storage = createStorageAdapter(STORAGE_BACKEND, {
  * @property {number} createdAt   - Date.now()
  * @property {number} updatedAt   - Date.now()
  * @property {'local'} source     - M2 Google Calendar 연동 대비 예약 필드
- * @property {string|null} externalId - M2 Google Calendar event id 대비 예약 필드
+ * @property {CalendarGate[]} gates - v4 관문 집합. **저장되는 진실 원천**이고
+ *                                  startDate·endDate·date는 여기서 파생된다(DD4·DD26)
+ * @property {string|null} projectId - 소속 프로젝트 참조. null이 무소속이다 (DD7)
+ */
+
+/**
+ * @typedef {Object} CalendarGate
+ * @property {string} id       - crypto.randomUUID()
+ * @property {'dev'|'review'|'stg'|'prod'|'monitor'|null} kind
+ *   관문 이름. **마이그레이션이 만드는 관문은 항상 `null`이다** (DD2) —
+ *   저장된 데이터가 단언하는 것은 날짜 둘이지 관문 이름 둘이 아니다.
+ * @property {string} planned  - 계획일 'YYYY-MM-DD'
+ * @property {string|null} actual - 실제 완료일. 없으면 null (DD6)
+ * @property {'pending'|'done'|'dropped'} status
+ *   `dropped`가 범위축소다 (DD5). 계획과 점유에는 남고 마감 판정에서만 빠진다 (DD5a).
+ */
+
+/**
+ * @typedef {Object} CalendarProject
+ * @property {string} id   - crypto.randomUUID()
+ * @property {string} name - 사용자 입력. 렌더는 반드시 textContent
  */
 
 /**
@@ -301,18 +365,233 @@ function formatShortDate(key) {
  * @param {any} input - 신뢰 불가 가능. v2 형식(date만 있음)도 받는다
  * @returns {CalendarEvent|null} 유효하지 않으면 null
  */
-function createCalendarEvent(input) {
+/**
+ * 날짜 키 배열의 중복 제거 + 오름차순 정렬 (DD1)
+ *
+ * 분기를 쓰지 않고 집합의 중복 제거로 "폭 없으면 관문 하나, 폭 있으면 둘"을
+ * 얻는다. 규칙이 두 개로 갈리지 않는 것이 DD1의 요점이다.
+ * @param {unknown[]} keys
+ * @returns {string[]} 유효한 날짜 키만, 오름차순
+ */
+function uniqueDates(keys) {
+  /** @type {Set<string>} */
+  const seen = new Set();
+  /** @type {string[]} */
+  const out = [];
+  keys.forEach((value) => {
+    const key = pickDateKey(value);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push(key);
+  });
+  out.sort();
+  return out;
+}
+
+/**
+ * 관문 하나의 생성 게이트 (Task 1)
+ *
+ * `createCalendarEvent()`와 **같은 형태**로 필드를 하나씩 적은 새 객체를 돌려준다.
+ * 전개(`{...input}`)나 `Object.assign`을 쓰지 않는 것이 이 저장소가 prototype
+ * pollution을 막는 유일한 방식이다 — `__proto__`·`constructor` 키가 섞여 들어와도
+ * 화이트리스트 밖이라 그대로 버려진다.
+ * @param {any} input - 신뢰 불가 가능
+ * @returns {CalendarGate|null} 유효하지 않으면 null
+ */
+function createCalendarGate(input) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
 
-  // v3의 startDate를 우선하고, 없으면 v2의 date에서 승격한다 (DD6).
-  const startDate = pickDateKey(input.startDate) || pickDateKey(input.date);
-  if (!startDate) return null;
+  // planned는 필수다. 날짜 없는 관문은 계획도 판정도 만들지 못한다.
+  const planned = pickDateKey(input.planned);
+  if (!planned) return null;
 
-  // endDate는 startDate와 **독립적으로** 왕복 검증한다.
-  let endDate = pickDateKey(input.endDate) || startDate;
-  if (endDate < startDate) endDate = startDate;
-  if (spanDays(startDate, endDate) > MAX_RANGE_DAYS) {
-    endDate = shiftDateKey(startDate, MAX_RANGE_DAYS - 1);
+  // 목록 밖의 kind와 null은 전부 '이름 없는 관문'으로 떨어진다 (DD2).
+  const kind = GATE_KINDS.indexOf(input.kind) !== -1 ? input.kind : null;
+  const status = GATE_STATUSES.indexOf(input.status) !== -1 ? input.status : 'pending';
+
+  return {
+    id: typeof input.id === 'string' && input.id ? input.id : crypto.randomUUID(),
+    kind,
+    planned,
+    actual: pickDateKey(input.actual) || null,
+    status,
+  };
+}
+
+/**
+ * 프로젝트 하나의 생성 게이트 (DD20)
+ *
+ * `id` 자동 생성은 **만들 때의 규칙이지 읽을 때의 규칙이 아니다.** 적재 경로는
+ * 이 함수에 넘기기 전에 `id`를 먼저 검사한다 — 그러지 않으면 손상된 행이 새 id를
+ * 달고 되살아나 봉인이 발화하지 않고, 옛 id를 든 이벤트들이 전건 무소속이 된다.
+ * @param {any} input - 신뢰 불가 가능
+ * @returns {CalendarProject|null}
+ */
+function createCalendarProject(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+
+  const name = String(input.name ?? '').slice(0, MAX_PROJECT_NAME_CHARS).trim();
+  if (!name) return null;
+
+  return {
+    id: typeof input.id === 'string' && input.id ? input.id : crypto.randomUUID(),
+    name,
+  };
+}
+
+/**
+ * 관문 배열 조립의 **유일한 구현** (DD36·DD25)
+ *
+ * `createCalendarEvent()`와 Task 4의 관문 CRUD 셋이 **둘 다 이것을 부른다.**
+ * 규칙이 생성 게이트 본문에 묻혀 있으면 CRUD는 그것을 부를 방법이 없어 결국
+ * 자기 안에 한 벌 더 쓰게 되고, 그때부터 가져오기와 편집기가 같은 입력에 다른
+ * 답을 낸다 — DD25가 금지한 갈라짐이 그것이다.
+ *
+ * 네 단계이고 **순서가 계약이다**:
+ * 1. 각 항목을 `createCalendarGate()`에 통과시키고 `null`을 버린다
+ * 2. 살아남은 것 중 **`kind === null`인 것만** `planned`를 키로 처음 것만 남긴다
+ * 3. 이름 있는 관문은 손대지 않는다 (같은 날 `dev`와 `review`가 서는 것이 이
+ *    마일스톤이 담으려는 업무 모양이다)
+ * 4. 상한 위반이면 **전체를 거절한다** (빈 배열). 넘치는 것만 잘라내면 기준점이
+ *    움직여 기존 관문이 조용히 사라진다 — 아래 본문 참고
+ *
+ * 접기가 **생성 게이트 뒤**에 오는 이유는 `planned`가 `makeDateKey()` 왕복 검증을
+ * 지난 정규 형태여야 키로 쓸 수 있기 때문이다. 검증 전 값으로 접으면 같은 날짜의
+ * 다른 표기가 서로 다른 키가 된다.
+ *
+ * 빈 배열이면 빈 배열을 돌려주고 **거절 판단은 하지 않는다** — `null`로 내릴지
+ * `false`로 내릴지는 부르는 쪽이 정한다.
+ * @param {unknown} inputGates
+ * @returns {CalendarGate[]}
+ */
+function normalizeGates(inputGates) {
+  if (!Array.isArray(inputGates)) return [];
+
+  /** @type {CalendarGate[]} */
+  const created = [];
+  inputGates.forEach((item) => {
+    const gate = createCalendarGate(item);
+    if (gate) created.push(gate);
+  });
+  if (created.length === 0) return [];
+
+  // 이름 없는 관문만 날짜로 접는다. 원래 순서를 보존한다.
+  /** @type {Set<string>} */
+  const seenAnonymous = new Set();
+  /** @type {CalendarGate[]} */
+  const folded = [];
+  created.forEach((gate) => {
+    if (gate.kind !== null) {
+      folded.push(gate);
+      return;
+    }
+    if (seenAnonymous.has(gate.planned)) return;
+    seenAnonymous.add(gate.planned);
+    folded.push(gate);
+  });
+
+  // 범위 상한과 개수 상한. **위반을 조용히 잘라내지 않고 빈 배열로 거절한다.**
+  //
+  // 예전에는 `filter`와 `slice`로 넘치는 것만 버렸다. 그런데 `earliest`는 입력에서
+  // 나오므로 기존 관문보다 366일 이른 관문이 하나 들어오면 **그것이 새 기준점이 되어
+  // 기존 관문 전부가 상한 밖으로 밀려 사라졌다.** addGate()는 남은 길이가 0이 아니라는
+  // 이유로 그것을 커밋하고 성공을 돌려줬다 — 연도 오타 한 번에 관문 집합이 통째로
+  // 날아가고 화면은 아무 말도 하지 않았다. 조용한 재생 불가 데이터 손실이다.
+  //
+  // 빈 배열은 이 함수의 **거절 신호**다(머리말 참고). 부르는 쪽이 각자 답한다:
+  // `createCalendarEvent()`는 `null`로 내려 가져오기 배치 전체를 거절하게 하고,
+  // 관문 CRUD 셋은 `false`를 돌려 편집기가 사용자에게 말하게 한다. 어느 쪽도
+  // 조용히 지우지 않는다.
+  //
+  // 개수 상한도 같은 판단으로 옮겼다. `slice`는 **뒤에 붙은 새 관문**을 버리므로
+  // 더하기가 성공으로 보고되면서 아무 일도 일어나지 않았다.
+  let earliest = folded[0].planned;
+  folded.forEach((gate) => {
+    if (gate.planned < earliest) earliest = gate.planned;
+  });
+  const exceedsRange = folded.some((gate) => spanDays(earliest, gate.planned) > MAX_RANGE_DAYS);
+  if (exceedsRange || folded.length > MAX_GATES_PER_EVENT) return [];
+
+  return folded;
+}
+
+/**
+ * 관문 집합에서 파생 범위를 다시 계산해 **같은 객체에 박고 그 객체를 돌려준다**
+ *
+ * DD26의 유지 지점이다. 관문을 만지고 이것을 부르지 않는 경로가 있으면
+ * `startDate`가 관문과 어긋난 채 커밋되고, 그 어긋남은 인덱스가 이벤트를
+ * 엉뚱한 날짜에 밀어 넣는 것으로 나타난다.
+ *
+ * **`dropped` 관문도 포함한다** (DD5a) — 계획은 남는다. 사용자가 그 날에
+ * 무언가를 하려 했다는 사실은 지워지지 않는다. 빠지는 것은 마감 판정뿐이다.
+ * @param {CalendarEvent} event
+ * @returns {CalendarEvent} 같은 객체
+ */
+function deriveEventRange(event) {
+  if (!event || !Array.isArray(event.gates) || event.gates.length === 0) return event;
+
+  let min = event.gates[0].planned;
+  let max = event.gates[0].planned;
+  event.gates.forEach((gate) => {
+    if (gate.planned < min) min = gate.planned;
+    if (gate.planned > max) max = gate.planned;
+  });
+
+  event.startDate = min;
+  event.endDate = max;
+  // DD6 잔존 필드. 입력의 date를 복사하지 않고 관문에서 다시 파생한다.
+  event.date = min;
+  return event;
+}
+
+function createCalendarEvent(input, options) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
+
+  const allowLegacyGateSynthesis = Boolean(options && options.allowLegacyGateSynthesis);
+
+  // 레거시 범위 필드. v2의 date · v3의 startDate/endDate이며, v4 항목에도
+  // DD4의 잔존 필드로 남아 있다.
+  const legacyStart = pickDateKey(input.startDate) || pickDateKey(input.date);
+  let legacyEnd = pickDateKey(input.endDate) || legacyStart;
+  if (legacyEnd < legacyStart) legacyEnd = legacyStart;
+  if (legacyStart && spanDays(legacyStart, legacyEnd) > MAX_RANGE_DAYS) {
+    legacyEnd = shiftDateKey(legacyStart, MAX_RANGE_DAYS - 1);
+  }
+
+  const done = input.done === true;
+
+  // 관문 집합이 v4의 진실 원천이다. 세 갈래이고 갈래마다 답이 다르다.
+  /** @type {CalendarGate[]|null} */
+  let gates = null;
+  if (Array.isArray(input.gates)) {
+    // (1) v4 모양이다. normalizeGates 가 빈 배열을 돌려주면(전부 무효이거나 상한
+    //     위반) 그것은 **손상**이고
+    //     범위에서 다시 만들지 않는다 — 재구성하면 각 관문의 kind·actual·status가
+    //     조용히 사라진 채 양 끝 익명 관문 둘로 덮인다. 되돌릴 수 없다.
+    gates = normalizeGates(input.gates);
+    if (gates.length === 0) return null;
+  } else if (allowLegacyGateSynthesis) {
+    // (2) gates가 없고 레거시 범위 필드가 있다. 승격과 **같은 방식**으로 만든다
+    //     — uniqueDates([startDate, endDate])이지 종단 관문 하나가 아니다.
+    //     하나만 만들면 5일짜리 일정이 하루로 접히고, deriveEventRange가
+    //     startDate := min(planned) = endDate로 다시 파생하므로 원래 시작일이
+    //     복구 불가능하게 사라진다 (santa R2 B2).
+    if (!legacyStart) return null;
+    const dates = uniqueDates([legacyStart, legacyEnd]);
+    gates = normalizeGates(
+      dates.map((planned, index) => ({
+        kind: null,
+        planned,
+        actual: null,
+        // 종단 관문만 이벤트의 done을 물려받는다. v3에 완료 시각이 없으므로
+        // actual은 전부 null이다 — 없는 값을 만들지 않는다.
+        status: index === dates.length - 1 && done ? 'done' : 'pending',
+      }))
+    );
+    if (gates.length === 0) return null;
+  } else {
+    // (3) 저장소가 이미 v4인데 gates가 없다 = 레거시가 아니라 손상이다.
+    return null;
   }
 
   const title = String(input.title ?? '').slice(0, MAX_TITLE_LENGTH).trim();
@@ -320,23 +599,27 @@ function createCalendarEvent(input) {
 
   const createdAt = Number.isFinite(input.createdAt) ? Number(input.createdAt) : Date.now();
 
-  return {
+  const event = {
     id: typeof input.id === 'string' && input.id ? input.id : crypto.randomUUID(),
-    startDate,
-    endDate,
-    // DD6 — M1 코드로 롤백해도 렌더되도록 남기는 잔존 필드.
-    // input.date를 복사하지 **않는다**. 복사하면 startDate와 어긋난 값이 그대로
-    // 저장되어 인덱스가 엉뚱한 날짜에 이벤트를 밀어 넣는다.
-    date: startDate,
+    // 아래 셋은 자리만 잡는다. 값은 deriveEventRange()가 관문에서 파생한다.
+    startDate: legacyStart || gates[0].planned,
+    endDate: legacyEnd || gates[0].planned,
+    date: legacyStart || gates[0].planned,
+    gates,
+    projectId: typeof input.projectId === 'string' && input.projectId ? input.projectId : null,
     title,
     note: String(input.note ?? '').slice(0, MAX_NOTE_LENGTH),
     priority: PRIORITIES.indexOf(input.priority) !== -1 ? input.priority : 'normal',
-    done: input.done === true,
+    done,
     createdAt,
     updatedAt: Number.isFinite(input.updatedAt) ? Number(input.updatedAt) : createdAt,
     source: 'local',
     externalId: typeof input.externalId === 'string' ? input.externalId : null,
   };
+
+  // DD26의 **첫째 호출 자리.** 입력의 옛 필드를 그대로 믿지 않고 관문에서 다시
+  // 파생한다 — 복사하면 관문을 편집한 뒤 옛 필드가 어긋나 인덱스가 깨진다.
+  return deriveEventRange(event);
 }
 
 /**
@@ -407,6 +690,239 @@ async function migrateSettingsToV2() {
  * 버전만 올라가거나 이벤트만 승격된 반쪽 상태가 남는다.
  * @returns {Promise<boolean>} 성공 여부. 실패를 조용히 넘기지 않고 고지에 반영한다
  */
+/**
+ * 이 이벤트에 **사용자가 손댄 관문**이 있는가
+ *
+ * 마이그레이션이 만든 관문은 전부 `kind: null` · `status: 'pending'` · `actual: null`
+ * 이다(DD2). 그 상태를 벗어난 관문이 하나라도 있으면 사용자가 관문을 직접 만졌다는
+ * 뜻이고, 그때부터 상세 모달의 시작일·종료일은 **파생 표시**가 된다.
+ *
+ * 이 구분이 필요한 이유: 관문이 있는 이벤트에서 파생 범위는 `min..max`이므로
+ * 모달에서 친 날짜를 그대로 저장하면 `deriveEventRange()`가 곧바로 덮어쓴다.
+ * 편집 가능한 것처럼 보이는 칸이 조용히 무시되는 것은 "저장된 척"과 같은 종류의
+ * 결함이므로, 사용자 관문이 있으면 그 칸을 읽기 전용으로 바꾸고 관문 편집기로
+ * 보낸다. 손댄 관문이 없으면(승격 직후) 범위 편집이 관문을 다시 만든다.
+ * @param {CalendarEvent} event
+ * @returns {boolean}
+ */
+function eventHasUserGateWork(event) {
+  const gates = event.gates || [];
+
+  // **관문 셋 이상은 범위 둘로 재구성될 수 없다.** 이름 없는 pending 관문만 있어도
+  // 마찬가지다 — 재합성은 `uniqueDates([startDate, endDate])`이므로 양 끝만 남고
+  // 가운데가 사라진다. 아래 `some`만 두었을 때 정확히 그 손실이 났다: 편집기의
+  // 종류 기본값이 '이름 없음'이라 사용자가 직접 세운 관문이 전부 이 판정을
+  // 통과하지 못했고, 아무것도 고치지 않고 저장만 눌러도 가운데 관문이 지워졌다.
+  //
+  // 둘까지는 안전하다. `deriveEventRange()`가 startDate := min, endDate := max로
+  // 박으므로 관문 둘은 정확히 그 양 끝이고 재합성해도 같은 집합이 나온다. 승격
+  // 직후(관문 하나 또는 둘)에 범위 편집이 관문을 다시 만드는 동작은 그대로 산다.
+  if (gates.length > 2) return true;
+
+  return gates.some(
+    (gate) => gate.kind !== null || gate.status !== 'pending' || gate.actual !== null
+  );
+}
+
+/**
+ * 관문의 계획 대비 실제를 한 줄로 (DD6)
+ *
+ * 회고·통계 **화면을 만들지 않는다**(UI7). 그 관문을 보고 있는 자리에서만 나온다.
+ * @param {CalendarGate} gate
+ * @returns {string} actual 이 없으면 빈 문자열
+ */
+function gateActualLabel(gate) {
+  if (!gate.actual) return '';
+  if (gate.actual === gate.planned) return `실제 ${gate.actual} · 정시`;
+  const early = gate.actual < gate.planned;
+  const from = early ? gate.actual : gate.planned;
+  const to = early ? gate.planned : gate.actual;
+  return `실제 ${gate.actual} · ${early ? '조기' : '지연'} ${spanDays(from, to) - 1}일`;
+}
+
+/**
+ * 이벤트의 완료 여부를 관문에서 파생한다 (DD5a)
+ *
+ * **살아 있는 관문 전부가 `done`인가.** `dropped`는 세지 않는다 — 범위를 줄인
+ * 작업이 영영 끝나지 않으면 안 되기 때문이다. `every`는 빈 배열에 `true`이므로
+ * 관문이 **전부 `dropped`인 경우가 분기 없이 완료로 떨어진다.**
+ *
+ * 종단 관문 하나만 보는 규칙과는 다르다: 앞선 살아 있는 관문이 `pending`인데
+ * 종단만 `done`이면 종단 규칙은 완료, 이 규칙은 미완료다. 후자가 옳다.
+ *
+ * 이 값이 화면에 닿는 자리는 `createDayCell()`의 `pendingCount`이며, 규칙이
+ * 갈리면 범위를 줄인 작업이 셀 안내에서 영영 미완료로 집계된다.
+ *
+ * **마이그레이션은 이 함수를 부르지 않는다.** 승격은 이벤트의 `done`을 그대로
+ * 보존하고 종단 관문에 물려주기만 한다(Task 2) — 여기서 다시 파생하면 완료된
+ * 다일 일정이 `[pending, done]`이 되어 `done`이 거짓으로 뒤집히고, 그것은
+ * 등가 단언이 금지한 "마이그레이션이 마감 의미를 바꿨다"가 된다. 새 규칙은
+ * 사용자가 관문을 실제로 편집한 뒤부터 적용된다.
+ * @param {CalendarGate[]} gates
+ * @returns {boolean}
+ */
+function deriveEventDone(gates) {
+  const living = (Array.isArray(gates) ? gates : []).filter((gate) => gate.status !== 'dropped');
+  return living.every((gate) => gate.status === 'done');
+}
+
+/**
+ * 끊긴 프로젝트 참조를 무소속으로 되돌린다 (DD28) — **새 배열을 돌려준다**
+ *
+ * **셋째 인자는 필수이고 없으면 던진다.** 조용한 기본값은 "안전하지만 숨긴다" —
+ * 호출부 하나가 서명 변경을 안 따라왔을 때 그 실수가 영영 드러나지 않는다.
+ * 그리고 인자를 빠뜨리면 `undefined`가 falsy 로 읽혀 강등하지 않는 쪽으로 조용히
+ * 붙는데, 그 침묵이 정확히 이 함수가 막으려는 종류의 결함이다.
+ *
+ * **`projectsLoaded`가 거짓이면 강등하지 않고 입력을 그대로 돌려준다.** 프로젝트
+ * 목록을 읽지 못한 상태에서 "목록에 없다"는 **참조가 끊겼다는 뜻이 아니라 모른다는**
+ * **뜻**이고, 모르는 것을 지우면 재생 불가 데이터가 사라진다. `loadEvents()`가 읽기
+ * 실패를 빈 배열로 바꾸지 않고 쓰기를 잠그는 것과 같은 판단이다.
+ *
+ * 강등만 하고 **이벤트는 지우지 않는다** (DD7).
+ * @param {CalendarEvent[]} events
+ * @param {CalendarProject[]} projects
+ * @param {{projectsLoaded: boolean}} options
+ * @returns {CalendarEvent[]}
+ * @throws {TypeError} projectsLoaded 가 boolean 이 아니면
+ */
+function reconcileProjectRefs(events, projects, options) {
+  const projectsLoaded = options ? options.projectsLoaded : undefined;
+  if (typeof projectsLoaded !== 'boolean') {
+    throw new TypeError('reconcileProjectRefs: projectsLoaded 는 필수 boolean 인자다 (DD28)');
+  }
+
+  const list = Array.isArray(events) ? events : [];
+  if (!projectsLoaded) return list;
+
+  /** @type {Set<string>} */
+  const known = new Set();
+  (Array.isArray(projects) ? projects : []).forEach((project) => {
+    if (project && typeof project.id === 'string' && project.id) known.add(project.id);
+  });
+
+  let downgraded = 0;
+  const next = list.map((event) => {
+    if (!event || !event.projectId || known.has(event.projectId)) return event;
+    downgraded += 1;
+    return { ...event, projectId: null };
+  });
+
+  if (downgraded > 0) {
+    console.error(`Calendar: downgraded ${downgraded} event(s) to unassigned (프로젝트 참조 끊김)`);
+  }
+  return next;
+}
+
+/**
+ * v2 → v3 승격 (DD19) — **순수 함수. 저장소도 searchWidthByWidget도 모른다.**
+ *
+ * 배열을 받아 배열을 돌려준다. 껍데기 `migrateCalendarToV3()`와 백업 마일스톤의
+ * 복구가 **같은 함수**를 부른다 — 두 번 구현하면 승격 의미가 경로마다 갈리고,
+ * 그것은 재생 불가 데이터에서 가장 나쁜 부채다.
+ *
+ * 승격 규칙 자체는 `createCalendarEvent()`가 이미 갖고 있다(`startDate`가 없으면
+ * `date`에서 올리고 `date`는 잔존 필드로 남긴다, DD6). 여기서 다시 적지 않는다 —
+ * 적으면 그 순간 규칙이 두 자리에 살게 된다.
+ *
+ * **입력 배열을 in-place 변형하지 않는다** (`newtab.js`의 persistEvents 규약과 같다).
+ * @param {unknown[]} events - v2 모양(date만 가진 항목)이 섞여 있을 수 있다
+ * @returns {CalendarEvent[]}
+ */
+function promoteEventsToV3(events) {
+  const list = Array.isArray(events) ? events : [];
+  /** @type {CalendarEvent[]} */
+  const promoted = [];
+  list.forEach((event) => {
+    // 이미 v3인 항목은 자기 값을 그대로 보존한다 (재실행 시 note/priority 유실 방지).
+    const next = createCalendarEvent(event, { allowLegacyGateSynthesis: true });
+    if (next) promoted.push(next);
+  });
+  return promoted;
+}
+
+/**
+ * v3 → v4 승격 (DD1·DD2·DD19) — **순수 함수.**
+ *
+ * 관문 집합은 `{startDate, endDate}`의 중복 제거다(DD1). 만들어지는 관문은
+ * `kind: null`이고(DD2) 종단 관문만 이벤트의 `done`을 물려받으며 `actual`은 전부
+ * `null`이다 — v3에 완료 시각이 없으므로 없는 값을 만들지 않는다. 그 규칙은
+ * `createCalendarEvent()`의 레거시 합성 갈래가 갖고 있고, 관문은 그 경로에서도
+ * `createCalendarGate()`를 지난다. 순수 함수라고 해서 생성 게이트를 건너뛰지
+ * 않는다 — 건너뛰면 마이그레이션이 유일하게 검사받지 않는 관문 생성 통로가 된다.
+ *
+ * **각 이벤트를 돌려주기 직전에 `deriveEventRange(event)`를 부른다** — DD26이 세는
+ * **셋째 호출 자리**다. 이 호출이 없으면 `startDate ≠ min(planned)`인 이벤트가
+ * 그대로 커밋된다.
+ *
+ * 이미 `gates`가 있으면 건드리지 않는다(멱등) — `createCalendarEvent()`가 입력의
+ * `gates`를 우선하므로 재실행이 관문을 다시 만들지 않는다.
+ * @param {unknown[]} events
+ * @returns {CalendarEvent[]}
+ */
+function promoteEventsToV4(events) {
+  const list = Array.isArray(events) ? events : [];
+  /** @type {CalendarEvent[]} */
+  const promoted = [];
+  list.forEach((event) => {
+    const next = createCalendarEvent(event, { allowLegacyGateSynthesis: true });
+    if (!next) return;
+    promoted.push(deriveEventRange(next));
+  });
+  return promoted;
+}
+
+/**
+ * 달력 데이터 스키마 v4 마이그레이션 (멱등, 1회)
+ *
+ * 읽기·가드·쓰기 **껍데기**다. 승격 규칙은 `promoteEventsToV4()`가 갖는다.
+ *
+ * 세 키를 **한 번의 set으로** 커밋한다. 두 번으로 나누면 사이에서 죽었을 때
+ * 버전만 올라가거나 이벤트만 승격된 반쪽 상태가 남는다.
+ * @returns {Promise<boolean>} 성공 여부. 실패를 조용히 넘기지 않고 고지에 반영한다
+ */
+async function migrateCalendarToV4() {
+  try {
+    const stored = await storage.get(['settingsVersion', 'calendarEvents', 'calendarProjects']);
+
+    if ((stored.settingsVersion ?? 1) >= SETTINGS_VERSION) return true;
+
+    // 값이 없는 것(첫 실행)과 배열이 아닌 것(손상)은 다르다. 후자를 []로 바꿔 쓰면
+    // 마이그레이션이 손상된 저장값을 **덮어써서 지운다** — loadEvents()가 봉인할
+    // 기회조차 사라지고, 사용자는 아무 설명 없이 빈 달력을 만난다. 승격하지 않고
+    // 실패로 돌려 고지에 반영한다(호출부가 applyStorageNotice 에 넘긴다).
+    // loadEvents()가 같은 구분을 같은 이유로 하고 있다.
+    if (stored.calendarEvents !== undefined && !Array.isArray(stored.calendarEvents)) {
+      console.error('Failed to migrate calendar to v4: 저장된 일정 형식이 올바르지 않습니다 (배열이 아님) — 승격하지 않습니다');
+      return false;
+    }
+
+    // **형제 키에도 같은 가드를 건다.** 위 세 줄의 판단을 calendarEvents 에만
+    // 걸어 두었을 때, 손상된 calendarProjects 가 []로 덮여 사라졌다 —
+    // loadProjects()의 봉인이 발화할 기회를 잃고, 그 목록을 "아는 프로젝트
+    // 전부"로 믿은 reconcileProjectRefs()가 멀쩡한 참조를 전건 강등한다.
+    // 손실이 두 겹이 되는 자리라 형제 키를 예외로 둘 근거가 없다.
+    if (stored.calendarProjects !== undefined && !Array.isArray(stored.calendarProjects)) {
+      console.error('Failed to migrate calendar to v4: 저장된 프로젝트 형식이 올바르지 않습니다 (배열이 아님) — 승격하지 않습니다');
+      return false;
+    }
+
+    const promoted = promoteEventsToV4(stored.calendarEvents);
+    // 프로젝트 컬렉션의 자리를 여기서 연다. 이미 있으면 건드리지 않는다.
+    const projects = Array.isArray(stored.calendarProjects) ? stored.calendarProjects : [];
+
+    await storage.set({
+      calendarEvents: promoted,
+      calendarProjects: projects,
+      settingsVersion: SETTINGS_VERSION,
+    });
+    return true;
+  } catch (error) {
+    console.error('Failed to migrate calendar to v4:', error);
+    return false;
+  }
+}
+
 async function migrateCalendarToV3() {
   try {
     const stored = await storage.get([
@@ -415,16 +931,23 @@ async function migrateCalendarToV3() {
       'searchWidthByWidget',
     ]);
 
-    if ((stored.settingsVersion ?? 1) >= SETTINGS_VERSION) return true;
+    // **자기 상수로 가드한다** (DD10). SETTINGS_VERSION을 읽으면 그것이 4로 오른
+    // 순간 이 마이그레이션이 영영 실행되지 않는다.
+    if ((stored.settingsVersion ?? 1) >= SETTINGS_VERSION_V3) return true;
 
-    const rawEvents = Array.isArray(stored.calendarEvents) ? stored.calendarEvents : [];
-    /** @type {CalendarEvent[]} */
-    const promoted = [];
-    rawEvents.forEach((event) => {
-      // 이미 v3인 항목은 자기 값을 그대로 보존한다 (재실행 시 note/priority 유실 방지).
-      const next = createCalendarEvent(event);
-      if (next) promoted.push(next);
-    });
+    // 값이 없는 것(첫 실행)과 배열이 아닌 것(손상)은 다르다. 후자를 []로 바꿔 쓰면
+    // 마이그레이션이 손상된 저장값을 **덮어써서 지운다** — loadEvents()가 봉인할
+    // 기회조차 사라지고, 사용자는 아무 설명 없이 빈 달력을 만난다. 승격하지 않고
+    // 실패로 돌려 고지에 반영한다(호출부가 applyStorageNotice 에 넘긴다).
+    // loadEvents()가 같은 구분을 같은 이유로 하고 있다.
+    if (stored.calendarEvents !== undefined && !Array.isArray(stored.calendarEvents)) {
+      console.error('Failed to migrate calendar to v3: 저장된 일정 형식이 올바르지 않습니다 (배열이 아님) — 승격하지 않습니다');
+      return false;
+    }
+
+    // 승격 본문은 순수 함수가 갖는다. 자체 구현을 남겨 두면 DD16의 증인이
+    // 가리키는 대상이 둘이 되어 판정이 죽는다.
+    const promoted = promoteEventsToV3(stored.calendarEvents);
 
     // 화이트리스트 복사. Object.keys 순회 + 대입은 '__proto__' 키가 섞였을 때
     // 프로토타입을 건드린다. 의미 있는 위젯 타입은 clock/calendar 둘뿐이다.
@@ -438,7 +961,7 @@ async function migrateCalendarToV3() {
     await storage.set({
       calendarEvents: promoted,
       searchWidthByWidget: nextWidths,
-      settingsVersion: SETTINGS_VERSION,
+      settingsVersion: SETTINGS_VERSION_V3,
     });
     return true;
   } catch (error) {
@@ -454,7 +977,10 @@ async function migrateCalendarToV3() {
  * 않는다 (PRODUCT.md 원칙 4). 확장에서 정상이면 아무것도 그리지 않는다.
  *
  * body에 쓰므로 모듈 평가 시점이 아니라 initialize()에서 부른다.
- * @param {{migrationFailed: boolean}} state
+ * @param {{migrationFailed?: boolean, projectsLoadFailed?: boolean}} state
+ *   **매번 처음부터 다시 만들어 통째로 대입한다 — 누적하지 않는다.** 그래서
+ *   부르는 쪽은 그 시점에 참인 상태를 **전부** 넘겨야 한다. 하나만 넘기면
+ *   앞서 띄운 고지가 지워진다 (DD37).
  */
 function applyStorageNotice(state) {
   document.body.dataset.storageBackend = STORAGE_BACKEND;
@@ -471,6 +997,9 @@ function applyStorageNotice(state) {
   }
   if (state.migrationFailed) {
     messages.push('설정 마이그레이션 실패');
+  }
+  if (state.projectsLoadFailed) {
+    messages.push('프로젝트 목록을 읽지 못했습니다 · 프로젝트 변경이 잠겨 있습니다');
   }
 
   if (messages.length === 0) {
@@ -490,10 +1019,38 @@ function applyStorageNotice(state) {
  * @throws {Error} 구조가 유효하지 않으면
  */
 function sanitizeImportedEvents(raw) {
-  if (!Array.isArray(raw)) {
+  // **봉투 판별이 함수의 첫 줄이다.** 뒤에 두면 {version:4, events:[...]}라는
+  // 정상 파일이 "최상위 구조가 배열이 아닙니다"로 죽는다 — 내보내기에 봉투를
+  // 씌우는 순간 자기 자신이 내보낸 파일을 못 읽는 상태가 된다.
+  //
+  // 아는 값 **둘을 열거하고 나머지를 전부 거절하는 화이트리스트**다. 아는 나쁜
+  // 값을 열거하는 블랙리스트가 아니므로 version 5가 미래에 생겨도 옛 코드는
+  // 그것을 추측해 읽지 않고 죽는다 — 그리고 그것이 옳다.
+  //
+  // 비교는 `===`와 숫자 리터럴이다. 느슨한 비교를 쓰면 version: "4"가 통과한다.
+  const isPlainObject = typeof raw === 'object' && raw !== null && !Array.isArray(raw);
+  /** @type {unknown[]} */
+  let items;
+  /** @type {boolean} */
+  let allowLegacyGateSynthesis;
+  if (Array.isArray(raw)) {
+    items = raw;
+    allowLegacyGateSynthesis = true;
+  } else if (isPlainObject && raw.version === 4 && Array.isArray(raw.events)) {
+    items = raw.events;
+    allowLegacyGateSynthesis = false;
+  } else if (isPlainObject) {
+    // version 부재 · {version:3} · {version:999} · version:4인데 events가 배열이
+    // 아닌 것이 전부 여기로 온다. 마지막 경우를 같은 줄에 두는 이유는, 봉투를
+    // 신뢰해 raw.events.forEach로 들어가면 TypeError가 나고 그 예외를 아래
+    // catch가 같은 문구로 받아 **의도한 거절과 우연한 크래시를 구별할 수 없게**
+    // 되기 때문이다.
+    throw new Error('알 수 없는 내보내기 형식입니다 (v3 배열 또는 version 4 봉투만 읽습니다)');
+  } else {
     throw new Error('최상위 구조가 배열이 아닙니다');
   }
-  if (raw.length > MAX_IMPORT_EVENTS) {
+
+  if (items.length > MAX_IMPORT_EVENTS) {
     throw new Error(`항목이 너무 많습니다 (최대 ${MAX_IMPORT_EVENTS}개)`);
   }
 
@@ -502,11 +1059,17 @@ function sanitizeImportedEvents(raw) {
   const sanitized = [];
   let usedChars = 0;
 
-  raw.forEach((item) => {
+  items.forEach((item, index) => {
     // 날짜 왕복 검증 · 범위 상한 · 메모 절단 · 중요도 화이트리스트가 전부
     // createCalendarEvent 안에 있다. 여기서 다시 구현하지 않는다.
-    const event = createCalendarEvent(item);
-    if (!event) return;
+    const event = createCalendarEvent(item, { allowLegacyGateSynthesis });
+    // **검증 탈락 항목이 하나라도 있으면 배치 전체를 거절한다.** 예전에는 그
+    // 항목만 건너뛰었는데, 그러면 사용자는 무엇이 빠졌는지 모른 채 "가져왔다"고
+    // 믿는다. 상한 초과에 이미 쓰고 있는 판단을 같은 이유로 넓힌 것이다.
+    // 던지면 replaceEvents()에 도달하지 않으므로 저장소는 손대지 않은 채 남는다.
+    if (!event) {
+      throw new Error(`${index + 1}번째 항목을 읽을 수 없습니다. 파일 전체를 가져오지 않았습니다`);
+    }
 
     if (usedIds.has(event.id)) event.id = crypto.randomUUID();
     usedIds.add(event.id);
@@ -1610,6 +2173,29 @@ class CalendarManager {
     this.loadFailed = false;
 
     /**
+     * 프로젝트 컬렉션. 항상 "마지막으로 영속된 상태" (DD7)
+     * @type {CalendarProject[]}
+     */
+    this.projects = [];
+
+    /**
+     * 프로젝트 목록 읽기가 실패했는가 (DD27a)
+     *
+     * 이름과 극성은 `this.loadFailed`를 그대로 따른다 — 실패 쪽을 참으로 두는 것이
+     * 이 저장소의 규약이므로 뒤집지 않는다. 이 플래그가 서 있는 동안 프로젝트
+     * 쓰기가 잠긴다. **빈 목록 자체가 위험한 것이 아니라 빈 목록을 근거로**
+     * **강등하는 것**이 위험하고, 그것을 막는 것이 이 플래그다.
+     * @type {boolean}
+     */
+    this.projectsLoadFailed = false;
+
+    /**
+     * 새 이벤트의 기본 프로젝트 (UI8). 그 프로젝트가 사라졌으면 무소속으로 내려간다.
+     * @type {string|null}
+     */
+    this.lastUsedProjectId = null;
+
+    /**
      * 렌더 창(42칸)에 걸친 이벤트만 담는 날짜 버킷. renderGrid()가 매 렌더마다 새로 만든다.
      *
      * 전역으로 범위를 날짜 전개하면 최악의 경우 `이벤트 수 × 범위 일수`만큼
@@ -1719,8 +2305,13 @@ class CalendarManager {
     }
 
     this.initializeModalRefs();
+    this.setupGateEditorListeners();
 
     await this.loadEvents();
+    // DD37 — `loadEvents()`와 **같은 자리**다. 여기서 부르지 않으면
+    // `projectsLoadFailed`가 세워지지 않고, `persistProjects()`의 가드가
+    // `undefined`를 거짓으로 읽어 **읽지 못한 프로젝트 위에 쓰기가 통과한다.**
+    await this.loadProjects();
     this.render();
     this.setupEventListeners();
     this.startRolloverWatch();
@@ -1767,6 +2358,27 @@ class CalendarManager {
       return;
     }
 
+    // **관문 편집기와 프로젝트 선택기는 선택적 참조다.** 하나라도 없으면 그 경로만
+    // 끄고 상세 모달 본체는 계속 동작하게 둔다 — 기존 참조 검증과 같은 판단이다.
+    const projectSelect = document.getElementById('calendarEventProject');
+    const gatesBox = document.getElementById('calendarEventGates');
+    const gateList = document.getElementById('calendarEventGateList');
+    const gateKind = document.getElementById('calendarEventGateKind');
+    const gateDate = document.getElementById('calendarEventGateDate');
+    const gateAdd = document.getElementById('calendarEventGateAdd');
+    const gateHint = document.getElementById('calendarEventGateHint');
+
+    const gateEditor =
+      gatesBox &&
+      gateList &&
+      gateKind instanceof HTMLSelectElement &&
+      gateDate instanceof HTMLInputElement &&
+      gateAdd instanceof HTMLButtonElement &&
+      gateHint
+        ? { box: gatesBox, list: gateList, kind: gateKind, date: gateDate, add: gateAdd, hint: gateHint }
+        : null;
+    if (!gateEditor) console.error('Calendar gate editor elements not found — 관문 편집 경로만 끕니다');
+
     this.modal = {
       root,
       heading,
@@ -1779,6 +2391,8 @@ class CalendarManager {
       error,
       deleteButton,
       cancelButton,
+      projectSelect: projectSelect instanceof HTMLSelectElement ? projectSelect : null,
+      gateEditor,
     };
   }
 
@@ -1820,9 +2434,301 @@ class CalendarManager {
     this.hideModalError();
     modal.deleteButton.hidden = mode !== 'edit';
 
+    // 프로젝트 선택기 — 새 일정의 기본값은 마지막에 쓴 프로젝트다 (UI8).
+    this.populateProjectPicker(event ? event.projectId : this.defaultProjectId());
+
+    // 관문 편집기는 **편집 모드에서만** 선다. 새 일정은 아직 id 가 없어 관문 CRUD 를
+    // 부를 수 없고, 그 관문은 아래 저장에서 시작일·종료일로부터 만들어진다 (DD1).
+    const derivedRange = mode === 'edit' && event ? eventHasUserGateWork(event) : false;
+    modal.startInput.readOnly = derivedRange;
+    modal.endInput.readOnly = derivedRange;
+    if (modal.gateEditor) {
+      modal.gateEditor.box.hidden = mode !== 'edit';
+      if (mode === 'edit' && event) {
+        // 관문 날짜 칸의 기본값은 **모달을 열 때 한 번만** 세운다. renderGateEditor
+        // 안에 두었을 때는 직전 일정에서 남은 값이 그대로 따라와 다음 일정의 새
+        // 관문 기본 날짜가 됐다.
+        modal.gateEditor.date.value = event.endDate;
+        this.renderGateEditor(event);
+      }
+    } else if (derivedRange) {
+      // 편집기가 없으면 잠긴 기간을 바꿀 수단이 하나도 남지 않는다. 잠긴 것만
+      // 보여 주고 이유를 말하지 않으면 그것도 "조용히 무시"와 같은 종류다.
+      this.showModalError('관문 편집기를 열 수 없어 기간을 바꿀 수 없습니다.');
+    }
+
     modal.root.classList.add('active');
     modal.titleInput.focus();
     modal.titleInput.select();
+  }
+
+  /**
+   * 프로젝트 선택기 채우기
+   *
+   * 무소속 자리를 항상 남긴다 — 프로젝트를 강제하지 않는다 (UI8).
+   * 목록을 읽지 못했으면 선택기를 잠근다: 읽지 못한 목록에서 고르게 하면
+   * 사용자가 "무소속"을 고른 것처럼 보이는 저장이 일어난다.
+   * @param {string|null} selectedId
+   */
+  populateProjectPicker(selectedId) {
+    const select = this.modal && this.modal.projectSelect;
+    if (!select) return;
+
+    select.textContent = '';
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = '무소속';
+    select.appendChild(none);
+
+    this.projects.forEach((project) => {
+      const option = document.createElement('option');
+      option.value = project.id;
+      // 사용자 입력이다. textContent 로만 쓴다.
+      option.textContent = project.name;
+      select.appendChild(option);
+    });
+
+    select.value = selectedId && this.projects.some((p) => p.id === selectedId) ? selectedId : '';
+    select.disabled = this.projectsLoadFailed;
+  }
+
+  /**
+   * 관문 목록 렌더 (Task 4)
+   *
+   * **셋을 펼치고 나머지는 접는다.** 정렬은 `planned` 오름차순이고 `dropped` 는
+   * 살아 있는 관문 **뒤로** 보낸다 — 계획은 남기되 먼저 보이지 않는다.
+   *
+   * 종류는 글자 라벨로만 구별하고 hue 를 주지 않는다. 전부 `textContent` 로 쓴다.
+   * @param {CalendarEvent} event
+   */
+  renderGateEditor(event) {
+    const editor = this.modal && this.modal.gateEditor;
+    if (!editor) return;
+
+    const gates = (event.gates || []).slice().sort((a, b) => {
+      const aDropped = a.status === 'dropped' ? 1 : 0;
+      const bDropped = b.status === 'dropped' ? 1 : 0;
+      if (aDropped !== bDropped) return aDropped - bDropped;
+      return a.planned < b.planned ? -1 : a.planned > b.planned ? 1 : 0;
+    });
+
+    editor.list.textContent = '';
+    const head = gates.slice(0, 3);
+    const rest = gates.slice(3);
+
+    head.forEach((gate) => editor.list.appendChild(this.createGateItem(event.id, gate)));
+
+    if (rest.length > 0) {
+      const details = document.createElement('details');
+      details.className = 'gate-more';
+      const summary = document.createElement('summary');
+      summary.textContent = `관문 ${rest.length}개 더 보기`;
+      details.appendChild(summary);
+      const more = document.createElement('ul');
+      more.className = 'gate-list';
+      rest.forEach((gate) => more.appendChild(this.createGateItem(event.id, gate)));
+      details.appendChild(more);
+      const wrapper = document.createElement('li');
+      wrapper.appendChild(details);
+      editor.list.appendChild(wrapper);
+    }
+
+    editor.hint.textContent =
+      gates.length >= MAX_GATES_PER_EVENT
+        ? `관문은 최대 ${MAX_GATES_PER_EVENT}개까지입니다`
+        : '';
+  }
+
+  /**
+   * 관문 한 줄
+   * @param {string} eventId
+   * @param {CalendarGate} gate
+   * @returns {HTMLLIElement}
+   */
+  createGateItem(eventId, gate) {
+    const item = document.createElement('li');
+    item.className = 'gate-item';
+    if (gate.status === 'done') item.classList.add('is-done');
+    if (gate.status === 'dropped') item.classList.add('is-dropped');
+    item.dataset.gateId = gate.id;
+
+    const kind = document.createElement('span');
+    kind.className = 'gate-kind';
+    // 이름 없는 관문 — 마이그레이션은 이름을 지어내지 않는다 (DD2).
+    kind.textContent = gate.kind || '이름 없음';
+    item.appendChild(kind);
+
+    const planned = document.createElement('span');
+    planned.className = 'gate-planned';
+    planned.textContent = gate.planned;
+    item.appendChild(planned);
+
+    const actualLabel = gateActualLabel(gate);
+    if (actualLabel) {
+      const actual = document.createElement('span');
+      actual.className = 'gate-actual';
+      actual.textContent = actualLabel;
+      item.appendChild(actual);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'gate-actions';
+    const add = (action, label) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'gate-action';
+      button.dataset.gateAction = action;
+      button.dataset.eventId = eventId;
+      button.dataset.gateId = gate.id;
+      button.textContent = label;
+      actions.appendChild(button);
+    };
+
+    if (gate.status === 'done') add('undone', '되돌리기');
+    else if (gate.status !== 'dropped') add('done', '완료');
+
+    if (gate.status === 'dropped') add('restore', '복구');
+    else add('drop', '범위축소');
+
+    add('remove', '삭제');
+    item.appendChild(actions);
+    return item;
+  }
+
+  /**
+   * 관문 편집기 배선. 목록은 매번 새로 그리므로 **위임**으로 건다.
+   */
+  setupGateEditorListeners() {
+    const editor = this.modal && this.modal.gateEditor;
+    if (!editor) return;
+
+    editor.list.addEventListener('click', async (e) => {
+      const target = e.target;
+      if (!(target instanceof HTMLElement)) return;
+      const button = target.closest('[data-gate-action]');
+      if (!(button instanceof HTMLElement)) return;
+
+      const action = button.dataset.gateAction;
+      const eventId = button.dataset.eventId;
+      const gateId = button.dataset.gateId;
+      if (!action || !eventId || !gateId) return;
+
+      // 편집기는 관문 CRUD 셋만 부르고 gates 를 직접 만지지 않는다.
+      let committed = false;
+      if (action === 'done') {
+        committed = await this.updateGate(eventId, gateId, { status: 'done', actual: this.todayKey });
+      } else if (action === 'undone') {
+        committed = await this.updateGate(eventId, gateId, { status: 'pending', actual: null });
+      } else if (action === 'drop') {
+        // 날짜와 이름은 남긴다 — 범위축소는 삭제가 아니다 (DD5).
+        committed = await this.updateGate(eventId, gateId, { status: 'dropped' });
+      } else if (action === 'restore') {
+        committed = await this.updateGate(eventId, gateId, { status: 'pending' });
+      } else if (action === 'remove') {
+        committed = await this.removeGate(eventId, gateId);
+        if (!committed) {
+          editor.hint.textContent = '마지막 관문은 지울 수 없습니다. 일정 자체를 지우려면 "일정 삭제"를 쓰세요.';
+          return;
+        }
+      }
+
+      if (!committed) {
+        editor.hint.textContent = '관문을 저장하지 못했습니다. 변경 사항은 적용되지 않았습니다.';
+        return;
+      }
+      this.refreshGateEditor(eventId, { gateId, action });
+    });
+
+    editor.add.addEventListener('click', async () => {
+      const state = this.modalState;
+      if (!state || !state.id) return;
+
+      const planned = pickDateKey(editor.date.value);
+      if (!planned) {
+        editor.hint.textContent = '관문 날짜를 확인해 주세요.';
+        return;
+      }
+
+      const gateCountOf = (id) => {
+        const found = this.events.find((event) => event.id === id);
+        return found ? (found.gates || []).length : 0;
+      };
+      const before = gateCountOf(state.id);
+
+      const committed = await this.addGate(state.id, {
+        kind: editor.kind.value || null,
+        planned,
+        actual: null,
+        status: 'pending',
+      });
+      if (!committed) {
+        editor.hint.textContent = `관문을 더하지 못했습니다. 최대 ${MAX_GATES_PER_EVENT}개이고, 가장 이른 관문에서 ${MAX_RANGE_DAYS}일을 넘을 수 없습니다.`;
+        return;
+      }
+
+      // **커밋이 성공해도 관문이 늘지 않을 수 있다.** 같은 날짜의 이름 없는 관문은
+      // 하나로 접히기 때문이다(DD25). 성공으로만 답하면 화면에 아무 변화가 없고
+      // 설명도 없어 "저장된 척"이 된다 — 상한 초과를 알려 주는 것과 같은 이유로
+      // 접힘도 말해야 한다.
+      const added = gateCountOf(state.id) > before;
+      this.refreshGateEditor(state.id);
+      if (!added) {
+        editor.hint.textContent = '같은 날짜의 이름 없는 관문은 하나로 접힙니다. 관문이 늘지 않았습니다.';
+      }
+    });
+  }
+
+  /**
+   * 커밋 뒤 편집기를 다시 그린다. 이벤트가 사라졌으면 모달을 닫는다.
+   * @param {string} eventId
+   * @param {{gateId: string, action: string}} [focus] - 방금 누른 버튼. 목록을
+   *   통째로 다시 그리므로 넘기지 않으면 포커스가 body 로 떨어진다.
+   */
+  refreshGateEditor(eventId, focus) {
+    const next = this.events.find((event) => event.id === eventId);
+    if (!next) {
+      this.closeEventModal();
+      return;
+    }
+    const editor = this.modal && this.modal.gateEditor;
+    if (editor) editor.hint.textContent = '';
+    this.renderGateEditor(next);
+    // 관문을 만지면 파생 범위가 바뀐다 — 모달의 날짜 칸도 함께 따라간다.
+    this.modal.startInput.value = next.startDate;
+    this.modal.endInput.value = next.endDate;
+    this.modal.startInput.readOnly = eventHasUserGateWork(next);
+    this.modal.endInput.readOnly = this.modal.startInput.readOnly;
+    if (editor && focus) this.restoreGateFocus(editor, focus);
+  }
+
+  /**
+   * 관문 목록을 다시 그린 뒤 포커스를 되돌린다
+   *
+   * `renderGateEditor()` 가 목록을 통째로 버리므로 방금 누른 버튼이 사라지고
+   * 포커스가 body 로 떨어진다. 키보드 사용자는 관문 하나를 만질 때마다 모달을
+   * 처음부터 다시 훑게 된다 — 모달이 이미 `modalReturnFocus` 로 같은 규약을
+   * 쓰고 있으므로 여기만 예외로 둘 근거가 없다.
+   *
+   * 액션은 누르면 짝으로 바뀌므로(완료·되돌리기 / 범위축소·복구) 같은 관문의
+   * **짝 버튼**을 찾는다. 삭제는 짝이 없어 관문 추가 버튼으로 보낸다.
+   * 선택자를 조립하지 않고 순회로 찾는다 — 관문 id 는 남의 파일에서 올 수 있고,
+   * 이 저장소는 신뢰 불가 문자열로 선택자를 만들지 않는다.
+   * @param {{list: HTMLElement, add: HTMLButtonElement}} editor
+   * @param {{gateId: string, action: string}} focus
+   */
+  restoreGateFocus(editor, focus) {
+    const wanted = GATE_ACTION_PAIRS[focus.action] || focus.action;
+    const match = Array.from(editor.list.querySelectorAll('[data-gate-action]')).find(
+      (button) => button.dataset.gateId === focus.gateId && button.dataset.gateAction === wanted
+    );
+    if (!match) {
+      editor.add.focus();
+      return;
+    }
+    // 넷째부터는 details 안에 접혀 있다. 펼치지 않으면 포커스가 가지 않는다.
+    const details = match.closest('details');
+    if (details) details.open = true;
+    match.focus();
   }
 
   /**
@@ -1934,13 +2840,41 @@ class CalendarManager {
       return;
     }
 
+    const projectId = modal.projectSelect ? modal.projectSelect.value || null : null;
+
+    /** @type {any} */
     const input = {
       startDate,
       endDate,
       title,
       note: modal.noteInput.value,
       priority: this.getModalPriority(),
+      projectId,
     };
+
+    // 재합성 여부는 **DOM 이 아니라 저장 직전의 이벤트에서 다시 계산한다.**
+    // `modal.startInput.readOnly` 를 읽던 예전 코드는 판단 근거를 화면 상태에
+    // 맡겼다 — 그 속성이 무슨 이유로든 실제 이벤트와 어긋나면 사용자가 친 날짜가
+    // 조용히 버려지거나 관문이 조용히 재구성된다. 근거는 readOnly 를 세운 것과
+    // **같은 술어**여야 한다.
+    const existingForSave =
+      this.modalState.mode === 'edit' && this.modalState.id
+        ? this.events.find((event) => event.id === this.modalState.id)
+        : null;
+    const derivedRange = existingForSave ? eventHasUserGateWork(existingForSave) : false;
+
+    if (derivedRange) {
+      // 파생 범위인데 값이 달라졌다면 **말해 준다.** 조용히 무시하면 저장된 것과
+      // 화면에 적은 것이 갈린다 — 이 함수 머리말이 금지한 바로 그것이다.
+      if (startDate !== existingForSave.startDate || endDate !== existingForSave.endDate) {
+        this.showModalError('기간은 관문에서 파생됩니다. 날짜는 관문 편집기에서 바꿔 주세요.');
+        return;
+      }
+    } else {
+      // 친 범위로 관문을 **다시 만든다.** `gates` 를 소유 속성으로 넘기는 것이 그
+      // 신호이고, 키 자체를 넘기지 않으면 기존 관문이 그대로 이긴다.
+      input.gates = undefined;
+    }
 
     const committed =
       this.modalState.mode === 'edit' && this.modalState.id
@@ -1953,6 +2887,10 @@ class CalendarManager {
       this.showModalError('저장하지 못했습니다. 변경 사항은 적용되지 않았습니다.');
       return;
     }
+
+    // 마지막에 쓴 프로젝트를 기억한다 (UI8). 실패해도 저장 자체는 이미 끝났으므로
+    // 여기서 되돌리지 않는다 — 기본값 하나가 다음 번에 무소속으로 뜰 뿐이다.
+    if (projectId) await this.setLastUsedProjectId(projectId);
 
     // 방금 저장한 일정이 보이는 자리로 뷰를 옮긴다
     const start = parseDateKey(startDate);
@@ -2074,7 +3012,34 @@ class CalendarManager {
       // 메모리에는 항상 v3 한 가지 형태만 둔다. 렌더 경로가 필드 유무를 검사하지
       // 않아도 되게 하려면 형태가 갈라지는 지점이 없어야 한다.
       const raw = stored || [];
-      this.events = raw.map((event) => createCalendarEvent(event)).filter((event) => event !== null);
+      // **여기서 false 다.** 이 Task가 SETTINGS_VERSION = 4와 시동 마이그레이션을
+      // 함께 세우므로 이 줄부터 저장소는 v4이고, `gates` 없는 행은 레거시가 아니라
+      // **손상**이다. 세 변경(상수 · 시동 배선 · 이 뒤집기)은 한 커밋에 함께 간다 —
+      // 앞 Task에 두면 v4가 아직 없는 구간에서 기존 v3 행이 전부 손상으로 판정되어
+      // 달력이 잠기고 DD14가 약속한 "Task 1~2까지는 옛 경로로 그대로 돈다"가 깨진다.
+      let dropped = 0;
+      this.events = raw
+        .map((event) => {
+          const next = createCalendarEvent(event, { allowLegacyGateSynthesis: false });
+          if (!next) dropped += 1;
+          return next;
+        })
+        .filter((event) => event !== null);
+
+      // **버린 것이 하나라도 있으면 봉인한다.** 예전에는 filter로 버린 뒤 곧바로
+      // loadFailed = false를 세웠고, 그러면 손상 이벤트가 조용히 사라진 채 앱이
+      // 열리고 사용자가 아무 일정이나 한 번 고치는 순간 짧아진 배열이 커밋되어
+      // 그 이벤트가 영구히 지워진다. 잠금 해제 경로는 이미 있다 —
+      // persistEvents()의 isFullReplacement가 통과시키므로 가져오기가 곧 복구다.
+      if (dropped > 0) {
+        console.error(`Calendar load: dropped ${dropped} corrupted event(s)`);
+        this.loadFailed = true;
+        this.showError(
+          `일정 ${dropped}건을 읽지 못해 저장이 잠겨 있습니다. 파일에서 가져오면 복구됩니다.`
+        );
+        return false;
+      }
+
       this.loadFailed = false;
       this.hideError();
       return true;
@@ -2085,6 +3050,265 @@ class CalendarManager {
       return false;
     }
     // 인덱스는 renderGrid()가 렌더 창을 알게 된 뒤에 만든다.
+  }
+
+  /**
+   * 프로젝트 목록 로드 (DD27a)
+   *
+   * `loadEvents()`와 **같은 규율**이다 — 값이 없는 것(첫 실행)과 배열이 아닌
+   * 것(손상)을 가르고, 후자를 조용히 `[]`로 바꾸지 않는다.
+   * @returns {Promise<boolean>} 로드 성공 여부
+   */
+  async loadProjects() {
+    try {
+      const result = await storage.get(['calendarProjects', 'lastUsedProjectId']);
+      const stored = result.calendarProjects;
+
+      if (stored !== undefined && !Array.isArray(stored)) {
+        throw new Error('저장된 프로젝트 형식이 올바르지 않습니다 (배열이 아님)');
+      }
+
+      const raw = stored || [];
+      let dropped = 0;
+      /** @type {CalendarProject[]} */
+      const projects = [];
+      raw.forEach((row) => {
+        // **각 행을 생성 게이트에 넘기기 전에 id 를 먼저 본다.**
+        // createCalendarProject()는 id 부재 시 새로 만들어 주므로(DD20) 그것에
+        // 맡기면 손상된 행이 새 id 를 달고 되살아나 봉인이 발화하지 않고, 옛 id 를
+        // 든 이벤트들이 다음 강등에서 전건 무소속이 된다. id 자동 생성은
+        // **만들 때의 규칙이지 읽을 때의 규칙이 아니다.**
+        if (!row || typeof row !== 'object' || typeof row.id !== 'string' || !row.id) {
+          dropped += 1;
+          return;
+        }
+        const project = createCalendarProject(row);
+        if (!project) {
+          dropped += 1;
+          return;
+        }
+        projects.push(project);
+      });
+
+      // **상한 절단도 "온전히 읽지 못한 것"이다.** dropped 와 같은 취급을 하지
+      // 않으면 51번째 이후 프로젝트가 조용히 사라진 채 봉인이 서지 않고, 그 목록을
+      // 아는 프로젝트 전부로 믿은 reconcileProjectRefs()가 그것을 가리키던 이벤트를
+      // 무소속으로 내린다. 쓰기 경로가 상한을 지키므로 도달은 드물지만, 드문 것과
+      // 막지 않는 것은 다르다.
+      const truncated = Math.max(0, projects.length - MAX_PROJECTS);
+      this.projects = projects.slice(0, MAX_PROJECTS);
+      this.lastUsedProjectId =
+        typeof result.lastUsedProjectId === 'string' && result.lastUsedProjectId
+          ? result.lastUsedProjectId
+          : null;
+
+      // 배열이 맞아도 항목이 손상됐으면 **저장된 것을 온전히 읽지 못한 것**이고,
+      // 그 목록을 근거로 강등하면 저장소에 멀쩡히 있는 프로젝트를 가리키던
+      // 이벤트가 전건 무소속으로 내려앉는다.
+      if (dropped > 0 || truncated > 0) {
+        console.error(
+          `Calendar: project list not fully read (corrupted=${dropped}, truncated=${truncated})`
+        );
+        this.projectsLoadFailed = true;
+        return false;
+      }
+
+      this.projectsLoadFailed = false;
+      return true;
+    } catch (error) {
+      console.error('Failed to load calendar projects:', error);
+      // 예외를 던지지 않고 빈 목록으로 두되 **플래그를 세운다.**
+      this.projects = [];
+      this.projectsLoadFailed = true;
+      return false;
+    }
+  }
+
+  /**
+   * 프로젝트를 바꾸는 **유일한** 쓰기 경로 (DD27)
+   *
+   * 본문은 세 줄이고 **순서가 계약이다**:
+   * 1. 읽지 못한 것을 덮어쓰지 않는다 (DD27a). 가드가 없으면 목록을 읽지 못한
+   *    상태에서 프로젝트 하나를 만드는 것만으로 `calendarProjects` 전체가 그 한
+   *    건으로 덮여 사라진다
+   * 2. 커밋 직전에 참조를 정리한다 (DD28)
+   * 3. 대입은 `persistEvents` 안에서 한다 (DD27b) — 여기서 하면 그 안의
+   *    `render()`보다 늦어 화면이 옛 목록을 그린다
+   *
+   * `async`도 필수다 — `persistEvents`가 `async`라 반환값을 그냥 `if`로 보면
+   * Promise 가 언제나 참이다.
+   * @param {CalendarProject[]} nextProjects
+   * @returns {Promise<boolean>} 커밋 성공 여부
+   */
+  async persistProjects(nextProjects) {
+    if (this.projectsLoadFailed) return false;
+    return this.persistEvents(
+      reconcileProjectRefs(this.events, nextProjects, { projectsLoaded: !this.projectsLoadFailed }),
+      { nextProjects }
+    );
+  }
+
+  /**
+   * 관문 추가 (DD26의 **둘째 호출 자리**)
+   *
+   * 세 단계이고 셋이 같다. 단계를 공통 헬퍼로 접지 않는 이유는, DD25의 접기와
+   * DD26의 파생이 **세 자리 각각에서** 일어나야 하고 그것을 자리마다 읽을 수
+   * 있어야 하기 때문이다.
+   *
+   * 1. 다음 관문 배열을 **새로 만든다** — `push`/`splice` 로 제자리 변형하지
+   *    않는다. 제자리 변형은 2번을 건너뛸 수 있는 유일한 길이다
+   * 2. `normalizeGates()` 를 통과시킨다 (DD36). `createCalendarEvent()` 가 부르는
+   *    것과 **같은 함수**이므로 가져오기와 편집기가 같은 답을 낸다
+   * 3. 빈 배열이면 커밋하지 않고 `false` (DD5)
+   * @param {string} eventId
+   * @param {{kind?: string|null, planned: string, actual?: string|null, status?: string}} input
+   * @returns {Promise<boolean>}
+   */
+  async addGate(eventId, input) {
+    const existing = this.events.find((event) => event.id === eventId);
+    if (!existing) return false;
+
+    const nextGates = normalizeGates((existing.gates || []).concat([input]));
+    if (nextGates.length === 0) return false;
+
+    const next = { ...existing, gates: nextGates, updatedAt: Date.now() };
+    next.done = deriveEventDone(nextGates);
+    deriveEventRange(next);
+
+    return this.persistEvents(this.events.map((event) => (event.id === eventId ? next : event)));
+  }
+
+  /**
+   * 관문 수정 — 완료 표시(`actual` + `status:'done'`)와 범위축소(`status:'dropped'`)가
+   * 전부 이 경로를 탄다. 자동 재배치는 하지 않는다 (UI6) — 관문 하나를 옮겨도
+   * 다른 관문은 그대로 있다.
+   * @param {string} eventId
+   * @param {string} gateId
+   * @param {{kind?: string|null, planned?: string, actual?: string|null, status?: string}} patch
+   * @returns {Promise<boolean>}
+   */
+  async updateGate(eventId, gateId, patch) {
+    const existing = this.events.find((event) => event.id === eventId);
+    if (!existing) return false;
+    if (!(existing.gates || []).some((gate) => gate.id === gateId)) return false;
+
+    // id 는 patch 가 덮지 못한다 — 덮으면 같은 관문이 둘로 갈린다.
+    const nextGates = normalizeGates(
+      existing.gates.map((gate) => (gate.id === gateId ? { ...gate, ...patch, id: gate.id } : gate))
+    );
+    if (nextGates.length === 0) return false;
+
+    const next = { ...existing, gates: nextGates, updatedAt: Date.now() };
+    next.done = deriveEventDone(nextGates);
+    deriveEventRange(next);
+
+    return this.persistEvents(this.events.map((event) => (event.id === eventId ? next : event)));
+  }
+
+  /**
+   * 관문 삭제
+   *
+   * **마지막 관문은 지워지지 않는다** — 결과가 빈 배열이면 커밋하지 않고 `false` 를
+   * 돌려준다 (DD5). 커밋하면 다음 적재에서 `createCalendarEvent()` 가 그 행을
+   * `null` 로 버려 **이벤트가 통째로 사라진다.**
+   * @param {string} eventId
+   * @param {string} gateId
+   * @returns {Promise<boolean>}
+   */
+  async removeGate(eventId, gateId) {
+    const existing = this.events.find((event) => event.id === eventId);
+    if (!existing) return false;
+
+    const nextGates = normalizeGates((existing.gates || []).filter((gate) => gate.id !== gateId));
+    if (nextGates.length === 0) return false;
+
+    const next = { ...existing, gates: nextGates, updatedAt: Date.now() };
+    next.done = deriveEventDone(nextGates);
+    deriveEventRange(next);
+
+    return this.persistEvents(this.events.map((event) => (event.id === eventId ? next : event)));
+  }
+
+  /**
+   * 프로젝트 생성
+   * @param {{name: string}} input
+   * @returns {Promise<boolean>}
+   */
+  async addProject(input) {
+    const project = createCalendarProject(input);
+    if (!project) return false;
+    if (this.projects.length >= MAX_PROJECTS) return false;
+    return this.persistProjects(this.projects.concat(project));
+  }
+
+  /**
+   * 프로젝트 이름 변경. 참조는 id 로 걸려 있으므로 이벤트를 훑지 않는다 (DD7)
+   *
+   * **아직 호출부가 없다.** 프로젝트 관리 화면이 다음 단계이고, 그 화면이 부를
+   * 쓰기 경로를 여기 미리 세워 둔 것이다. 그 사실을 적어 두지 않으면 다음 사람이
+   * 죽은 코드로 읽고 지운다.
+   * @param {string} id
+   * @param {string} name
+   * @returns {Promise<boolean>}
+   */
+  async renameProject(id, name) {
+    const existing = this.projects.find((project) => project.id === id);
+    if (!existing) return false;
+
+    const next = createCalendarProject({ id: existing.id, name });
+    if (!next) return false;
+
+    return this.persistProjects(this.projects.map((project) => (project.id === id ? next : project)));
+  }
+
+  /**
+   * 프로젝트 삭제
+   *
+   * 그 프로젝트를 가리키던 이벤트는 **무소속으로 강등되고 지워지지 않는다** (DD7) —
+   * 재생 불가 데이터다. 강등은 `persistProjects()`가 부르는
+   * `reconcileProjectRefs()`가 하므로 여기서 다시 하지 않는다.
+   * @param {string} id
+   * @returns {Promise<boolean>}
+   */
+  async removeProject(id) {
+    if (!this.projects.some((project) => project.id === id)) return false;
+
+    const committed = await this.persistProjects(this.projects.filter((project) => project.id !== id));
+    // 지운 프로젝트가 기본값이었다면 무소속으로 내려간다 (UI8).
+    if (committed && this.lastUsedProjectId === id) await this.setLastUsedProjectId(null);
+    return committed;
+  }
+
+  /**
+   * 새 이벤트의 기본 프로젝트 (UI8)
+   *
+   * 마지막에 쓴 프로젝트이고, 그것이 사라졌으면 무소속(`null`)으로 떨어진다.
+   * @returns {string|null}
+   */
+  defaultProjectId() {
+    if (this.lastUsedProjectId && this.projects.some((project) => project.id === this.lastUsedProjectId)) {
+      return this.lastUsedProjectId;
+    }
+    return null;
+  }
+
+  /**
+   * 마지막 사용 프로젝트 기록
+   *
+   * 이벤트와 무관한 **설정**이므로 `persistEvents()`의 스냅샷에 넣지 않는다.
+   * @param {string|null} id
+   * @returns {Promise<boolean>}
+   */
+  async setLastUsedProjectId(id) {
+    const next = typeof id === 'string' && id ? id : null;
+    try {
+      await storage.set({ lastUsedProjectId: next });
+      this.lastUsedProjectId = next;
+      return true;
+    } catch (error) {
+      console.error('Failed to save lastUsedProjectId:', error);
+      return false;
+    }
   }
 
   /**
@@ -2138,9 +3362,13 @@ class CalendarManager {
    * 스냅샷을 커밋하는 것을 막는다.
    *
    * @param {CalendarEvent[]} nextEvents - 새 배열 (기존 배열 in-place 변형 금지)
-   * @param {{isFullReplacement?: boolean}} [options] - 전체 교체(가져오기)는
-   *   loadFailed 잠금을 통과한다. 기존 목록에서 파생되지 않으므로 읽기 성공에
-   *   의존하지 않고, 읽기가 영구히 깨졌을 때 유일한 복구 수단이다.
+   * @param {{isFullReplacement?: boolean, nextProjects?: CalendarProject[]}} [options]
+   *   `isFullReplacement` — 전체 교체(가져오기)는 loadFailed 잠금을 통과한다.
+   *   기존 목록에서 파생되지 않으므로 읽기 성공에 의존하지 않고, 읽기가 영구히
+   *   깨졌을 때 유일한 복구 수단이다.
+   *   `nextProjects` — 함께 커밋할 프로젝트 목록 (DD22·DD27). 서명은 바꾸지
+   *   않는다: 원자성은 `set()` 호출이 **하나라는 사실**에서 나오고, 개명하면
+   *   `opSeq`·`loadFailed`·롤백 규약을 쓰는 기존 호출부 전부가 회귀 위험에 든다.
    * @returns {Promise<boolean>} 커밋 성공 여부
    */
   async persistEvents(nextEvents, options) {
@@ -2153,15 +3381,36 @@ class CalendarManager {
       return false;
     }
 
+    // 프로젝트를 함께 커밋하는 분기에는 **프로젝트 쪽 봉인도 여기 건다.**
+    // 봉인이 persistProjects()에만 있으면 nextProjects 를 넘기는 새 호출부 하나가
+    // 그것을 조용히 무력화한다 — 인자를 받는 함수가 그 인자의 전제를 지키는 것이
+    // 호출부 규율보다 강하다 (security-reviewer F4·F6).
+    const nextProjects = options ? options.nextProjects : undefined;
+    if (nextProjects !== undefined) {
+      if (!Array.isArray(nextProjects)) {
+        throw new TypeError('persistEvents: options.nextProjects 는 배열이어야 한다');
+      }
+      if (this.projectsLoadFailed) {
+        this.showError('프로젝트 목록을 읽지 못해 프로젝트 변경이 잠겨 있습니다.');
+        return false;
+      }
+    }
+
     const opToken = ++this.opSeq;
     this.pending = { nextEvents, opToken };
     this.setPendingState(true);
 
     try {
-      await storage.set({ calendarEvents: nextEvents });
+      // **set() 호출은 어느 분기에서도 정확히 하나다.** 둘로 나누면 사이에서
+      // 죽었을 때 이벤트만 커밋되고 프로젝트가 남는 반쪽 상태가 생긴다.
+      const payload = { calendarEvents: nextEvents };
+      if (nextProjects) payload.calendarProjects = nextProjects;
+      await storage.set(payload);
       if (opToken !== this.opSeq) return false;
 
       this.events = nextEvents;
+      // DD27b — 대입은 **여기서**, 아래 render() 보다 앞에서 한다.
+      if (nextProjects) this.projects = nextProjects;
       this.pending = null;
       // 전체 교체가 성공했다면 저장소 내용이 확정됐다 — 잠금을 푼다.
       this.loadFailed = false;
@@ -2249,7 +3498,10 @@ class CalendarManager {
    * @returns {Promise<boolean>} 커밋 성공 여부
    */
   async addEvent(input) {
-    const event = createCalendarEvent(input);
+    // **이 줄이 없으면 이 Task 직후부터 새 일정을 만들 수 없다.** 상세 모달과
+    // 간편 입력은 `gates`를 만들지 않고 범위 필드만 주는데, createCalendarEvent의
+    // 기본값이 false라 그 입력은 전부 "v4인데 gates가 없다 = 손상"으로 떨어진다.
+    const event = createCalendarEvent(input, { allowLegacyGateSynthesis: true });
     if (!event) return false;
 
     return this.persistEvents(this.events.concat(event));
@@ -2266,14 +3518,29 @@ class CalendarManager {
     if (!existing) return false;
 
     // id·createdAt·done은 보존하고 편집 가능한 필드만 덮는다.
-    const next = createCalendarEvent({
-      ...input,
-      id: existing.id,
-      done: existing.done,
-      createdAt: existing.createdAt,
-      updatedAt: Date.now(),
-      externalId: existing.externalId,
-    });
+    // 관문·프로젝트는 이 경로에서 편집하지 않는다 — 관문은 Task 4의 CRUD 셋이,
+    // 프로젝트는 선택기가 갖는다. 여기서는 기존 값을 그대로 물려준다.
+    // allowLegacyGateSynthesis는 gates를 함께 넘기지 않는 호출(간편 편집)을 위해
+    // 남긴다 — 넘기면 그쪽이 이기므로 관문이 있는 이벤트는 영향받지 않는다.
+    const next = createCalendarEvent(
+      {
+        ...input,
+        id: existing.id,
+        // **소유 속성 유무가 신호다.** `gates: undefined`를 명시적으로 넘기면
+        // "범위에서 다시 만들라"는 뜻이고, 키 자체를 넘기지 않으면 기존 관문이
+        // 그대로 이긴다. `??`로 쓰면 둘을 구별할 수 없어 모달에서 친 날짜가
+        // 조용히 무시된다.
+        gates: Object.prototype.hasOwnProperty.call(input, 'gates') ? input.gates : existing.gates,
+        projectId: Object.prototype.hasOwnProperty.call(input, 'projectId')
+          ? input.projectId
+          : existing.projectId,
+        done: existing.done,
+        createdAt: existing.createdAt,
+        updatedAt: Date.now(),
+        externalId: existing.externalId,
+      },
+      { allowLegacyGateSynthesis: true }
+    );
     if (!next) return false;
 
     return this.persistEvents(this.events.map((event) => (event.id === id ? next : event)));
@@ -2309,7 +3576,14 @@ class CalendarManager {
    * @returns {Promise<boolean>}
    */
   async replaceEvents(nextEvents) {
-    return this.persistEvents(nextEvents, { isFullReplacement: true });
+    // **DD28의 가져오기 호출 자리다.** replaceEvents()는 calendarEvents 만
+    // 교체하므로 남의 파일에서 온 projectId 가 전건 끊긴 채 들어온다.
+    // handleCalendarImport()는 건드리지 않는다 — 참조 무결성은 UI 핸들러가 알
+    // 일이 아니고, 이 함수가 가져오기의 유일한 관문이므로 여기 하나면 된다.
+    const reconciled = reconcileProjectRefs(nextEvents, this.projects, {
+      projectsLoaded: !this.projectsLoadFailed,
+    });
+    return this.persistEvents(reconciled, { isFullReplacement: true });
   }
 
   /**
@@ -2321,7 +3595,12 @@ class CalendarManager {
    * @returns {CalendarEvent[]}
    */
   getEvents() {
-    return this.events.map((event) => ({ ...event }));
+    // 관문 배열까지 복사한다. 얕은 복사만 하면 호출자가 gates를 in-place로
+    // 변형해 persistEvents()를 우회한 채 메모리와 저장소를 어긋나게 할 수 있다.
+    return this.events.map((event) => ({
+      ...event,
+      gates: (event.gates || []).map((gate) => ({ ...gate })),
+    }));
   }
 
   /**
@@ -2620,15 +3899,41 @@ class CalendarManager {
   /**
    * 이벤트 하나의 마감 상태
    *
-   * 판정 기준은 **종료일**이다. 3일짜리 일정의 첫날은 아직 지연이 아니다.
+   * 판정 기준은 **종단 관문**이다 (DD3). 3일짜리 일정의 첫날은 아직 지연이 아니다.
+   *
+   * 마이그레이션 직후에는 `dropped` 관문이 없으므로 종단 관문의 `planned` 가 파생
+   * `endDate` 와 **같은 값**이고, 따라서 마감 판정 결과도 전후로 같다. `dropped` 가
+   * 결과를 바꾸는 것은 사용자가 관문을 내린 **뒤**이며 그때의 동작은 DD5a 가 정한다.
    * @param {CalendarEvent} event
    * @returns {'' | 'overdue' | 'today' | 'soon'}
    */
   getEventDueState(event) {
     if (event.done) return '';
-    if (event.endDate < this.todayKey) return 'overdue';
-    if (event.endDate === this.todayKey) return 'today';
-    if (event.endDate === shiftDateKey(this.todayKey, 1)) return 'soon';
+
+    // **종단 관문** = `status !== 'dropped'` 인 관문 중 `planned` 가 가장 늦은 것
+    // (DD3·DD5a). 관문 전부가 마감 상태를 만들게 하면 마이그레이션 다음 날 아침에
+    // 요약 배너가 **없던 지연 건수를 보고한다** — 지나간 startDate 가 전부 overdue 가
+    // 되기 때문이다. 그래서 입력을 종단 관문 하나로 고정한다.
+    //
+    // `dropped` 를 제외하는 이유는 **범위를 줄인 행위가 늦은 것으로 뒤집히면 안 되기**
+    // 때문이다. 8월 25일 관문을 "안 하기로" 표시했는데 25일이 지나 그 작업이
+    // 지연으로 보고되면, PRD 가 M2 에 요구한 "조기·지연·범위축소가 구분되어 남는다"가
+    // 저장 필드에만 있고 판정에는 없는 상태가 된다.
+    //
+    // `planned` **하나만** 읽으므로 같은 날짜의 관문이 둘이어도 어느 것을 골랐는지가
+    // 답을 바꾸지 않는다 — DD25 가 동점 타이브레이크를 두지 않은 근거가 이것이다.
+    let terminal = '';
+    (event.gates || []).forEach((gate) => {
+      if (gate.status === 'dropped') return;
+      if (!terminal || gate.planned > terminal) terminal = gate.planned;
+    });
+
+    // 살아 있는 관문이 하나도 없으면(전부 dropped) 마감이 없다 — 지연도 오늘도 아니다.
+    if (!terminal) return '';
+
+    if (terminal < this.todayKey) return 'overdue';
+    if (terminal === this.todayKey) return 'today';
+    if (terminal === shiftDateKey(this.todayKey, 1)) return 'soon';
     return '';
   }
 
@@ -4047,7 +5352,9 @@ class SettingsManager {
       return;
     }
 
-    const json = JSON.stringify(this.calendarManager.getEvents(), null, 2);
+    // 버전 봉투를 씌운다. 맨 배열이면 v3 내보내기와 손상된 v4 내보내기가
+    // 구별되지 않고, 가져오기가 무엇을 가정해야 할지 알 수 없다.
+    const json = JSON.stringify({ version: 4, events: this.calendarManager.getEvents() }, null, 2);
     const blob = new Blob([json], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
@@ -4114,10 +5421,14 @@ class Application {
     // SettingsManager 생성보다 반드시 앞서야 한다.
     const v2Ok = await migrateSettingsToV2();
     const v3Ok = await migrateCalendarToV3();
+    // **반환값을 받는다.** migrateCalendarToV4()는 v3와 같은 모양이라 catch에서
+    // false를 돌려주고 던지지 않는다 — 받지 않으면 아래 고지가 v4 실패를 담을 값을
+    // 갖지 못하고 실패가 통째로 조용해진다 (santa R0 B4).
+    const v4Ok = await migrateCalendarToV4();
 
     // 저장소가 확장이 아니거나 마이그레이션이 실패했다면 화면으로 말한다.
     // body가 존재하는 이 시점이 dataset을 세울 수 있는 가장 이른 지점이다.
-    applyStorageNotice({ migrationFailed: !v2Ok || !v3Ok });
+    applyStorageNotice({ migrationFailed: !v2Ok || !v3Ok || !v4Ok });
 
     // DOM 요소 가져오기
     const timeElement = document.getElementById('time');
@@ -4178,6 +5489,13 @@ class Application {
 
     this.calendarManager = new CalendarManager(calendarWidget);
     await this.calendarManager.initialize();
+
+    // DD37 — 프로젝트 읽기 실패는 calendarManager 가 생긴 뒤에야 알 수 있다.
+    // 위 첫 호출은 그대로 두고 여기서 한 번 더 부른다. **둘 다 넘긴다** —
+    // 이 함수는 messages 를 매번 처음부터 다시 만들어 통째로 대입하므로
+    // projectsLoadFailed 만 넘기면 첫 고지가 지워진다.
+    // **한 줄로 적는다**: 그래야 "두 키를 함께 넘겼는가"를 기계가 한 줄에서 본다.
+    applyStorageNotice({ migrationFailed: !v2Ok || !v3Ok || !v4Ok, projectsLoadFailed: this.calendarManager.projectsLoadFailed });
 
     this.settingsManager = new SettingsManager(
       settingsModal,
