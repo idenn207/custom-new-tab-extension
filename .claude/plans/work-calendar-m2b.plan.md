@@ -35,6 +35,8 @@ santa 루프가 8라운드를 돌고 캡에서 종료했다(`.claude/reviews/san
 
 **UI8과 UI15가 "M2에 포함한다"·"M2에서 표현된다"라고 말한다.** 이 플랜이 그 M2의 후반부이므로 둘 다 지켜진다 — 다만 **PRD의 M2 행은 두 플랜이 모두 끝나야 `complete`가 된다.** 전반부만 끝난 상태는 M2가 끝난 상태가 아니다. 그 표기 규칙을 Task 5가 강제한다.
 
+**UI15는 통째로 이 플랜이 지고 UI8은 셋 중 하나만 진다 — 그 경계를 여기 적는다**(santa R1 B2). UI8의 문장은 요구 셋이고, 앞의 둘은 **전반부**가 이미 진다: "프로젝트를 강제하지 않는다(무소속 `null` 자리)"는 전반부 DD7·Task 3이, "기본값은 마지막에 쓴 프로젝트"는 전반부 Task 3의 설정 키 `lastUsedProjectId`가 받는다. **이 플랜이 지는 것은 셋째 "첫 실행 온보딩" 하나이고**, 그것을 DD13과 Task 3이 받는다. 전반부의 같은 자리(`work-calendar-m2.plan.md` User Intent 아래)가 이 분할을 같은 말로 적고 있다 — 한쪽만 적으면 그것이 다음 쌍둥이가 된다.
+
 ## Patterns to Mirror
 
 | Category | Source | Pattern |
@@ -161,7 +163,7 @@ santa 루프가 8라운드를 돌고 캡에서 종료했다(`.claude/reviews/san
 
   **하나만 고치면 그리드와 패널이 같은 날짜에 다른 답을 낸다**(DD32). 둘을 한 Task에 둔 이유가 그것이다 — 나누면 그 사이에 그 버그가 실재하는 커밋이 생긴다.
 - **Mirror**: `newtab.js:2097` `rebuildIndex()`의 버킷 구성과 `2129` `getEventsForDate()`의 전체 훑기
-- **Validate**: `runCalendarOccupancyCases(collector)`가 넷을 전부 돌리고 아래 넷을 단언한다.
+- **Validate**: `runCalendarOccupancyCases(collector)`가 **다섯**을 전부 돌리고 아래 **다섯**을 단언한다(santa R1 B3 — santa R0 B2가 고정 입력과 단언을 하나씩 더하면서 이 머리말의 수를 넷으로 남겨 두었다).
 
   1. `assert(setEq(bucketKeys, allGatePlannedDates), '점유가 관문 집합과 다르다')` — 점유의 **정의**가 관문이라는 DD31의 단언이다
   2. `assert(isSubset(bucketKeys, legacyRangeDates), '관문에 없던 날을 점유했다')` — 관문은 옛 범위 안에 있으므로 새 날이 생길 수 없다
@@ -286,8 +288,8 @@ shasum -a 256 -c .claude/plans/work-calendar-m2b.rebaseline.sha256
 - [ ] `[기계]` **앵커 둘이 있고 뒤엣것이 통과한다** — Task 0이 `m2b-baseline.sha256`을(구현 전 기록), Task 4가 재베이스라인 직후 `m2b-rebaseline.sha256`을 남겼고 `shasum -c`가 후자에서 통과한다
 - [ ] `[사람]` 스모크 하네스 단언 실패 0건
 - [ ] `[사람]` **시계 모드 경로 `snapshot()` diff 0** (UI13)
-- [ ] `[기계+사람]` **`runCalendarOccupancyCases()`가 존재하고(기계) 단언 넷이 통과한다(사람)** — 점유가 관문 집합과 같고, 관문에 없던 날을 점유하지 않고, 칩이 `min(버킷 길이, MAX_CHIPS_PER_CELL)`와 같고, 4일 폭 입력에서 점유가 둘로 준다
-- [ ] `[사람]` **그리드와 패널이 같은 날짜에 같은 답을 낸다** — `today-3`·`today` 관문 이벤트에서 `today-1` 셀이 비어 있고 그 날짜의 `getEventsForDate()`도 빈 배열이다 (DD32)
+- [ ] `[기계+사람]` **`runCalendarOccupancyCases()`가 존재하고(기계) 단언 다섯이 통과한다(사람)** — 점유가 관문 집합과 같고, 관문에 없던 날을 점유하지 않고, 칩이 `min(버킷 길이, MAX_CHIPS_PER_CELL)`와 같고, 4일 폭 입력에서 점유가 둘로 줄고, **같은 날 `dev`·`review` 관문을 가진 이벤트 하나의 버킷 길이가 1이다**(DD31의 이벤트별 접기). **마지막 항이 빠지면 접기를 빼먹은 구현이 최종 게이트를 통과하고, 그리드에는 칩 둘 · 패널에는 이벤트 하나가 남는다** — DD32가 막으려는 불일치가 그대로 출하된다 (santa R1 B3)
+- [ ] `[사람]` **그리드와 패널이 같은 날짜에 같은 답을 낸다** — `today-3`·`today` 관문 이벤트에서 `today-1` 셀이 비어 있고 그 날짜의 `getEventsForDate()`도 빈 배열이다 (DD32). **그리고 같은 날 `dev`·`review` 관문을 가진 이벤트 하나에서 `today` 셀의 칩이 하나이고 `getEventsForDate(today)`도 길이 1이다** — 앞의 것은 "둘 다 비었나"를, 이것은 "둘 다 하나인가"를 묻는다. 접기 누락은 앞의 것을 통과하고 이것만 죽인다 (santa R1 B3)
 - [ ] `[사람]` **`dropped` 관문이 점유에는 남는다** — 안 하기로 한 관문의 셀이 여전히 차 있다. 계획은 남는다 (DD31)
 - [ ] `[사람]` **불연속 배치가 눈에 보인다** — `today-3`·`today` 관문 이벤트를 만들고 그리드에서 `today-2`·`today-1` 셀이 **비어 있는지** 눈으로 확인한다. 이것이 M2의 헤드라인 결과물이다 (UI15)
 - [ ] `[사람]` **UI4 판정은 사람이 눈으로 본다** — 달력 표면을 전반부 종료 상태와 나란히 놓고, 프로젝트가 **기존 뱃지 자리에 이름만**으로, 관문이 **기존 칩 형태 그대로** 나오는지 확인한다. 새 색·새 아이콘·새 칩 모양·새 상시 표면이 하나라도 생겼으면 실패다. **기계로 판정할 수단이 없다** — `snapshot()`은 기하만 담으므로 이 항목의 대역이 될 수 없다
