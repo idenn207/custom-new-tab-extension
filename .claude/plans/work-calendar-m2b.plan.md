@@ -54,7 +54,7 @@ santa 루프가 8라운드를 돌고 캡에서 종료했다(`.claude/reviews/san
 
 전반부의 DD4가 연속 범위를 파생값으로 강등한 것은 **v3 롤백용 잔존 필드를 남기기 위해서이지 점유의 근거로 삼기 위해서가 아니다.** 잔존 필드를 점유 계산에 쓰면 강등이 이름만 강등이 된다 — 저장은 관문으로 하면서 화면은 여전히 범위로 말하므로, 사용자가 보는 것은 M1과 같다.
 
-`rebuildIndex()`가 이벤트마다 `event.gates`를 돌며 `g.planned` 하나하나를 버킷에 넣는다. 파생 `startDate`·`endDate`는 인덱스 입력에서 빠지고 DD4가 정한 원래 용도(v3 롤백 입력)로 돌아간다. `dropped` 관문도 버킷에 들어간다 — **계획은 남는다.** 안 하기로 한 것과 애초에 없던 것은 다르고, 그 구분이 PRD가 M2에 요구한 "범위축소가 구분되어 남는다"의 화면 쪽 몫이다.
+`rebuildIndex()`가 이벤트마다 `event.gates`를 돌며 `g.planned` 하나하나를 버킷에 넣는다. **단, 한 이벤트는 한 날짜에 한 번만 들어간다** — 이벤트별로 `planned`를 집합으로 접은 뒤 넣는다(santa R0 B2). 전반부 DD25가 같은 날 `dev`·`review`를 **허용하므로**, 접지 않으면 그 이벤트가 같은 버킷에 두 번 들어가 그리드는 칩을 둘 그리는데 DD32의 `getEventsForDate()`는 `.some(...)`이라 패널에 하나를 낸다 — 아래 DD32가 막으려는 바로 그 불일치가 다른 입구로 돌아온다. **접는 것은 이벤트 안에서만이다**: 서로 다른 이벤트가 같은 날에 서는 것은 그대로 버킷 길이 둘이고, 그것이 Task 1 고정 입력 3번이 지키는 구분이다. 파생 `startDate`·`endDate`는 인덱스 입력에서 빠지고 DD4가 정한 원래 용도(v3 롤백 입력)로 돌아간다. `dropped` 관문도 버킷에 들어간다 — **계획은 남는다.** 안 하기로 한 것과 애초에 없던 것은 다르고, 그 구분이 PRD가 M2에 요구한 "범위축소가 구분되어 남는다"의 화면 쪽 몫이다.
 
 이 결정은 santa R0에서 리뷰어가 PRD와 플랜의 어긋남을 잡은 뒤 **사용자가 정했다**(2026-08-22). 대안은 PRD의 M2 행에서 "표현된다"를 M3으로 내리는 것이었고 기각됐다.
 
@@ -151,8 +151,9 @@ santa 루프가 8라운드를 돌고 캡에서 종료했다(`.claude/reviews/san
      | 2 | `today` | `today` | 폭 없는 항목이 그대로인가 |
      | 3 | `today`, `today` (이벤트 둘) | `today` 하나, 버킷 길이 2 | 키 목록과 버킷 길이가 다른 것임을 드러낸다 |
      | 4 | `today-1`(dropped), `today+1` | `today-1`, `today+1` **둘 다** | `dropped`가 점유에 남는가 (DD31) |
+     | 5 | `today`(`kind: 'dev'`), `today`(`kind: 'review'`) — **이벤트 하나** | `today` 하나, 버킷 길이 **1** | 전반부 DD25가 허용하는 같은 날 관문 둘이 한 이벤트를 두 번 점유하지 않는가 (santa R0 B2) |
 
-     **각 고정 입력 줄에 주석 표식 `DD31-FIXTURE`를 단다.** Validation이 그 표식을 세어 넷 미만이면 죽는다. 표식이 값의 정확성을 증명하지는 않지만, "폭 없는 항목만으로 케이스를 써 두어 DD31이 구현되지 않아도 통과하는" 실패 모양은 확실히 잡는다.
+     **각 고정 입력 줄에 주석 표식 `DD31-FIXTURE`를 단다.** Validation이 그 표식을 세어 **다섯** 미만이면 죽는다. 표식이 값의 정확성을 증명하지는 않지만, "폭 없는 항목만으로 케이스를 써 두어 DD31이 구현되지 않아도 통과하는" 실패 모양은 확실히 잡는다.
 
   **고치는 것 — 둘이고 둘 다 필수다(DD32).**
   - `rebuildIndex()`(`newtab.js:2097`) — `event.gates`를 돌며 `g.planned` 각각을 버킷에 넣는다. **파생 `startDate`·`endDate`는 인덱스 입력에서 뺀다.** `dropped` 관문도 넣는다
@@ -167,7 +168,9 @@ santa 루프가 8라운드를 돌고 캡에서 종료했다(`.claude/reviews/san
   3. 각 날짜 `d`에 대해 `assert(chipCountsByDate[d] === Math.min(bucketSizesByDate[d], MAX_CHIPS_PER_CELL), '그리드 칩이 인덱스와 어긋난다')` — **인덱스가 맞다는 것과 화면이 맞다는 것은 다른 주장이다.** `rebuildIndex()`만 옳게 고치고 `createChips()`가 옛 범위로 그리면 1·2번은 통과하고 여기서만 죽는다. 비교 대상이 **키 목록이 아니라 버킷 길이**인 것과 상한 절단을 함께 넣는 것이 요점이다(키 목록에서 유도하면 언제나 1이고, 자르지 않은 수와 비교하면 상한을 넘는 날에서 옳은 구현이 죽는다)
   4. **1번 고정 입력에서** `assert(bucketKeys.length === 2, '불연속 배치가 반영되지 않았다 — 4일 폭인데 점유가 줄지 않았다')` — 이 줄이 없으면 `rebuildIndex()`를 고치지 않고도 1~3번이 전부 통과한다
 
-  더해서 **그리드와 패널의 일치**를 단언한다 — 1번 고정 입력에서 `today-1` 셀이 비어 있고 **그 날짜의 `getEventsForDate()`도 빈 배열**인지. 둘 중 하나만 고치면 여기서 죽는다(DD32).
+  5. **5번 고정 입력에서** `assert(bucketSizesByDate[today] === 1, '같은 날 관문 둘이 한 이벤트를 두 번 점유했다')` — 전반부 DD25가 허용하는 모양이고, 이벤트 안에서 접지 않으면 버킷 길이가 2가 되어 3번 단언을 타고 칩이 둘 그려진다(DD31, santa R0 B2)
+
+  더해서 **그리드와 패널의 일치**를 단언한다 — 1번 고정 입력에서 `today-1` 셀이 비어 있고 **그 날짜의 `getEventsForDate()`도 빈 배열**인지. 둘 중 하나만 고치면 여기서 죽는다(DD32). **5번 고정 입력에서도 같은 일치를 본다** — `today` 셀의 칩이 **하나**이고 `getEventsForDate(today)`도 길이 **1**인지. 1번은 "둘 다 비었나"를 묻고 이쪽은 "둘 다 하나인가"를 물으므로, 접기 누락은 1번을 통과하고 여기서만 죽는다(santa R0 B2).
 
 ### Task 2: 렌더 표면 적응
 
@@ -248,9 +251,9 @@ for fn in runCalendarOccupancyCases runCalendarOnboardingCases; do
   runall | grep -q "$fn(collector)" || { echo "NOT WIRED into runAll(): $fn"; exit 1; }
 done
 
-#    고정 입력 표식 — 넷을 센다
+#    고정 입력 표식 — 다섯을 센다 (5번은 santa R0 B2 가 더한 같은 날 관문 둘 케이스)
 F=$(grep -c "DD31-FIXTURE" test/positioning.smoke.js)
-[ "$F" -ge 4 ] || { echo "DD31 고정 입력 표식이 ${F}개 — Task 1이 요구하는 넷을 못 채운다"; exit 1; }
+[ "$F" -ge 5 ] || { echo "DD31 고정 입력 표식이 ${F}개 — Task 1이 요구하는 다섯을 못 채운다"; exit 1; }
 
 # 3. 앵커 — 끝 상태 게이트는 **뒤쪽**이다.
 #    Task 0 의 baseline.sha256 은 구현 전 기록이고, Task 1~4 가 하네스를 고치므로
@@ -279,7 +282,7 @@ shasum -a 256 -c .claude/plans/work-calendar-m2b.rebaseline.sha256
 
 - [ ] `[사람]` Task 0~5 전부 완료
 - [ ] `[기계]` `node --check` 둘 다 통과
-- [ ] `[기계]` **Validation 2번이 통과한다** — 함수 둘의 존재, `runAll()` 배선 둘, `DD31-FIXTURE` 표식 넷
+- [ ] `[기계]` **Validation 2번이 통과한다** — 함수 둘의 존재, `runAll()` 배선 둘, `DD31-FIXTURE` 표식 **다섯**(santa R0 B2 가 같은 날 관문 둘 케이스를 더했다)
 - [ ] `[기계]` **앵커 둘이 있고 뒤엣것이 통과한다** — Task 0이 `m2b-baseline.sha256`을(구현 전 기록), Task 4가 재베이스라인 직후 `m2b-rebaseline.sha256`을 남겼고 `shasum -c`가 후자에서 통과한다
 - [ ] `[사람]` 스모크 하네스 단언 실패 0건
 - [ ] `[사람]` **시계 모드 경로 `snapshot()` diff 0** (UI13)
