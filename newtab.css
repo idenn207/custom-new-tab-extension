@@ -1508,6 +1508,167 @@ body[data-widget-type="calendar"] .calendar-widget {
   display: none;
 }
 
+/* --- 첫 실행 온보딩 (DD13 · UI8) --- */
+/*
+ * 상시 표면이 아니다. storage-notice와 같은 fixed 오버레이라 달력 밴드의 높이 예산에
+ * 들어가지 않는다 — 밴드 안의 흐름에 넣으면 나타나는 순간 .calendar-month에 내부
+ * 스크롤이 생기고, 그것은 "온보딩이 레이아웃을 바꾸지 않는다"는 요구와 정면으로
+ * 부딪힌다(실패 배너가 오버레이인 것과 같은 이유다).
+ *
+ * **새 시각 언어를 만들지 않는다(UI4)** — 색·굵기·간격을 전부 기존 토큰에서 가져오고
+ * 새 강조색도 새 아이콘도 두지 않는다. 관문의 시각 어휘는 M3의 몫이다.
+ */
+.calendar-onboarding {
+  position: fixed;
+  left: 50%;
+  bottom: var(--space-lg);
+  transform: translateX(-50%);
+  z-index: 130;
+
+  width: min(92vw, 420px);
+  padding: var(--space-md);
+  /*
+   * 사진 위에 **불투명 카드를 얹지 않는다** — 그러면 사진이 액자 테두리로 전락한다.
+   * 본문을 담는 유리이므로 표면을 눌러 대비를 얻는다: 알파를 올리는 것이 아니라
+   * brightness() 를 건다. 같은 자리의 .storage-notice 가 쓰는 값 그대로다.
+   */
+  background: var(--bg-secondary-glass);
+  backdrop-filter: blur(10px) brightness(0.62);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+
+  font-size: var(--text-body);
+  line-height: var(--leading-normal);
+  letter-spacing: var(--tracking-ui);
+  color: var(--text-primary);
+}
+
+.calendar-onboarding[hidden] {
+  display: none;
+}
+
+/*
+ * 고지가 떠 있는 동안만 그 위로 올라간다.
+ *
+ * 둘 다 fixed 하단 중앙이고 기본 위치에서 약 18px 겹친다 — .storage-notice 는
+ * bottom 12px 에 약 30px 높이(12px × 1.5 + 패딩 12px + 테두리 2px)라 y 12~42px 를
+ * 쓰는데 이 카드의 아래끝이 24px 이고 z-index 가 130 대 120 이라 **카드가 고지를
+ * 덮는다.** 침묵하지 않기로 한 고지(PRODUCT.md 원칙 4)가 새 표면에 가려지는 것은
+ * 그 원칙을 되돌리는 일이고, STORAGE_BACKEND === 'local-preview' 면 고지가 **항상**
+ * 뜨므로 미리보기 첫 로드에서는 매번 겹친다 — UI4 육안 판정을 하는 바로 그 표면이다.
+ *
+ * 형제 선택자로 **조건부로** 올린다. 무조건 올리면 고지가 없는 확장 정상 경로에서
+ * 카드가 이유 없이 떠 있고, 그것은 없는 문제를 위해 있는 화면을 비트는 것이다.
+ * newtab.html 에서 이 노드는 #storageNotice 의 뒤 형제라 `~` 가 닿는다.
+ *
+ * 여유는 알약이 **두 줄로 접히는 폭까지** 덮는다: 12px(알약 bottom) + 50px(두 줄
+ * 알약) + 8px(간격). 좁은 화면에서 문구가 접혀도 겹치지 않는다.
+ */
+.storage-notice:not([hidden]) ~ .calendar-onboarding {
+  bottom: calc(var(--space-sm) + 50px + var(--space-xs));
+}
+
+.calendar-onboarding-title {
+  font-size: var(--text-body);
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-tight);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  margin-bottom: var(--space-2xs);
+}
+
+.calendar-onboarding-lead {
+  font-size: var(--text-caption);
+  color: var(--text-secondary);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+  margin-bottom: var(--space-sm);
+}
+
+.calendar-onboarding-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-xs);
+}
+
+/* 라벨은 남는다. 사라지는 placeholder 를 라벨로 쓰지 않는다 */
+.calendar-onboarding-label {
+  flex: 1 1 100%;
+  font-size: var(--text-caption);
+  font-weight: var(--weight-medium);
+  color: var(--text-secondary);
+  margin-bottom: calc(var(--space-2xs) * -1);
+}
+
+.calendar-onboarding-input {
+  flex: 1 1 100%;
+  min-width: 0;
+  padding: var(--space-xs) var(--space-sm);
+  /* 이미 유리인 표면 안쪽에 backdrop-filter 를 다시 걸지 않는다 */
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: var(--text-body);
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.calendar-onboarding-input::placeholder {
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.calendar-onboarding-input:focus {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: var(--calendar-accent);
+}
+
+/* 포커스 링은 화면 전체에서 하나다 — 컨트롤마다 다른 표시를 만들지 않는다 */
+.calendar-onboarding-input:focus-visible,
+.calendar-onboarding-create:focus-visible,
+.calendar-onboarding-skip:focus-visible {
+  outline: 2px solid var(--calendar-accent);
+  outline-offset: 2px;
+}
+
+.calendar-onboarding-create,
+.calendar-onboarding-skip {
+  flex: 1 1 0;
+  padding: var(--space-xs) var(--space-sm);
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-secondary);
+  font: inherit;
+  font-size: var(--text-body);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
+}
+
+.calendar-onboarding-create {
+  color: var(--text-primary);
+  border-color: var(--accent-color);
+}
+
+.calendar-onboarding-create:hover,
+.calendar-onboarding-skip:hover {
+  background: var(--hover-bg);
+}
+
+/* 실패를 침묵하지 않는다 (PRODUCT.md 원칙 4). 성공하면 노드가 다시 숨는다 */
+.calendar-onboarding-error {
+  margin-top: var(--space-xs);
+  font-size: var(--text-caption);
+  color: var(--calendar-overdue);
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+.calendar-onboarding-error[hidden] {
+  display: none;
+}
+
 /* --- 저장·읽기 실패 배너 --- */
 /*
  * 오버레이다. 이전에는 밴드의 마지막 flex 자식이라 나타나는 순간 높이 예산
@@ -3003,6 +3164,9 @@ body[data-widget-type='calendar'] .search-container.overlap-offset.position-cent
   .calendar-todo-toggle,
   .calendar-todo-delete,
   .calendar-todo-input,
+  .calendar-onboarding-input,
+  .calendar-onboarding-create,
+  .calendar-onboarding-skip,
   .calendar-todo-add,
   .calendar-todo-edit,
   .calendar-detail-add,

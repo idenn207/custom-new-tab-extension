@@ -503,6 +503,33 @@
   -->
   <p class="storage-notice" id="storageNotice" role="status" hidden></p>
 
+  <!--
+    첫 실행 온보딩 (DD13 · UI8). **상시 표면이 아니다** — 프로젝트가 하나도 없고
+    설정을 정상으로 읽은 첫 로드에서만 JS가 hidden을 풀고, 만들거나 건너뛰면 다시
+    뜨지 않는다. applyStorageNotice()가 쓰는 storage-notice와 같은 형태이고 같은
+    자리에 둔다: 달력 밴드 밖의 fixed 표면이므로 밴드 높이도 패널 스크롤도 움직이지
+    않는다.
+  -->
+  <div class="calendar-onboarding" id="calendarOnboarding" role="dialog" aria-modal="false"
+    aria-labelledby="calendarOnboardingTitle" hidden>
+    <h2 class="calendar-onboarding-title" id="calendarOnboardingTitle">프로젝트 만들기</h2>
+    <p class="calendar-onboarding-lead">
+      할 일을 프로젝트로 묶습니다. 만들지 않아도 됩니다 — 무소속으로 계속 쓸 수 있습니다.
+    </p>
+    <form class="calendar-onboarding-form" id="calendarOnboardingForm">
+      <!-- 라벨은 남는 자리에 둔다. placeholder 는 예시이지 라벨이 아니다 — 입력을
+           시작하는 순간 사라져 무엇을 적는 칸이었는지가 함께 사라진다 -->
+      <label class="calendar-onboarding-label" for="calendarOnboardingName">프로젝트 이름</label>
+      <input type="text" class="calendar-onboarding-input" id="calendarOnboardingName" maxlength="60"
+        autocomplete="off" spellcheck="false" placeholder="예: 사내 포털 개편">
+      <!-- id 를 둔다 — 저장이 도는 동안 이 버튼을 disabled 로 잠가야 하고(이중 제출),
+           같은 형제 중 다른 컨트롤은 이미 전부 id 로 잡힌다 -->
+      <button type="submit" class="calendar-onboarding-create" id="calendarOnboardingCreate">프로젝트 만들기</button>
+      <button type="button" class="calendar-onboarding-skip" id="calendarOnboardingSkip">건너뛰기</button>
+    </form>
+    <p class="calendar-onboarding-error" id="calendarOnboardingError" role="status" hidden></p>
+  </div>
+
   <script src="newtab.js"></script>
 </body>
 

@@ -1718,6 +1718,612 @@ async function runErrorBannerGeometryCases(collector) {
   progress('error banner geometry cases 완료');
 }
 
+/* ──────────────────── 관문 점유 · 렌더 규칙 (M2b) ──────────────────── */
+
+/**
+ * 관문 점유(DD31) · 그리드-패널 일치(DD32) · 렌더 규칙 셋(Task 2)
+ *
+ * **이 함수가 담는 단언은 열이다** — 점유 다섯 · 그리드-패널 일치 둘 · 렌더 규칙 셋.
+ * Task 2 의 셋이 여기 들어오는 이유는 같은 고정 입력을 재사용하기 때문이고, 함수를
+ * 늘리면 존재·배선 검사와 Acceptance 의 수까지 함께 흔들린다. 점유 다섯만 쓰고 함수를
+ * 닫으면 TASK2-RULE-n 표식 검사에서 죽는다.
+ *
+ * 고정 입력마다 프레임을 새로 띄운다 — 한 프레임에 다 넣으면 "1번 입력에서 점유가
+ * 관문 둘로 줄었다" 와 "5번 입력에서 버킷 길이가 1이다" 가 서로를 부정한다.
+ * @param {ReturnType<typeof createCollector>} collector
+ */
+async function runCalendarOccupancyCases(collector) {
+  // ── 헬퍼 ──────────────────────────────────────────────────────────────
+  // setEq 는 이 파일에 이미 있지만 **다른 케이스 함수 안의 지역 const 다.**
+  // isSubset 은 아예 없다. 없는 헬퍼를 부르는 단언은 돌지 않으므로 둘 다 여기 둔다.
+  const setEq = (a, b) => a.length === b.length && a.slice().sort().join(',') === b.slice().sort().join(',');
+  const isSubset = (a, b) => a.every((x) => b.includes(x));
+  // MAX_CHIPS_PER_CELL 은 newtab.js 의 **const** 라 프레임 전역에 붙지 않는다
+  // (function 선언과 달리 const 는 window 프로퍼티가 아니다). 값을 여기 복제하되
+  // 드리프트는 Validation 2-d 가 원본 쪽을 고정해 잡는다.
+  const CHIP_CAP = 2; // ← newtab.js: const MAX_CHIPS_PER_CELL = 2;
+  const OVERDUE_LABEL = '지연'; // ← newtab.js: DUE_STATE_LABELS.overdue
+
+  /** 빈 v4 저장소에서 달력 프레임을 새로 띄운다 */
+  const freshCalendar = async () => {
+    const frameWindow = await loadApp({
+      settingsVersion: 4,
+      widgetType: 'calendar',
+      mainWidgetEnabled: true,
+      searchEnabled: true,
+      calendarEvents: [],
+      calendarProjects: [],
+    });
+    return { frameWindow, calendar: frameWindow['__newTabApp'].calendarManager };
+  };
+
+  /**
+   * 고정 입력의 관문이 전부 렌더 창 안에 들어오도록 창을 맞춘다.
+   *
+   * rebuildIndex() 는 창 밖 날짜를 버킷에 넣지 않으므로, 오늘이 그 달 1일이면서
+   * 일요일이면 42칸 창이 정확히 오늘에서 시작해 today-3 이 창 밖으로 나가고
+   * **옳은 구현에서도 1번이 깨진다.** 돌리는 날에 따라 결과가 갈리는 케이스는
+   * 없느니만 못하므로 앞뒤 달까지 시도한 뒤, 그래도 안 들어오면 아래 전제 단언이
+   * 케이스 결함이라고 말한다.
+   * @returns {Set<string>} 렌더된 창의 날짜 집합
+   */
+  const focusWindowOn = (frameWindow, calendar, dates) => {
+    const renderedDates = () =>
+      new Set(Array.from(frameWindow.document.querySelectorAll('.calendar-day')).map((cell) => cell.dataset.date));
+    const offsets = [0, -1, 1];
+    let windowDates = renderedDates();
+    for (let i = 0; i < offsets.length; i += 1) {
+      const anchor = new Date(calendar.viewYear, calendar.viewMonth + offsets[i], 1);
+      calendar.viewYear = anchor.getFullYear();
+      calendar.viewMonth = anchor.getMonth();
+      calendar.render();
+      windowDates = renderedDates();
+      if (dates.every((key) => windowDates.has(key))) return windowDates;
+    }
+    return windowDates;
+  };
+
+  /**
+   * 인덱스와 화면에서 값을 뽑는다.
+   *
+   * **출처가 서로 다른 것이 요점이다** — 버킷 둘은 인덱스에서, 칩 개수는 렌더된
+   * DOM 에서 나온다. 셋 다 인덱스에서 뽑으면 칩 단언이 "인덱스와 인덱스"를 비교하게
+   * 되어 createChips() 가 옛 범위로 그려도 통과한다. 그리고 allGatePlannedDates 는
+   * **이벤트의 관문**에서 나온다 — 인덱스에서 뽑으면 이 단언은 자기가 만든 기대값과
+   * 자기를 비교한다.
+   */
+  const measure = (frameWindow, calendar) => {
+    const bucketKeys = Array.from(calendar.eventsByDate.keys()).sort();
+    const bucketSizesByDate = Object.fromEntries(
+      Array.from(calendar.eventsByDate.entries()).map(([date, list]) => [date, list.length])
+    );
+    const chipCountsByDate = Object.fromEntries(
+      Array.from(frameWindow.document.querySelectorAll('.calendar-day')).map((cell) => [
+        cell.dataset.date,
+        cell.querySelectorAll('.calendar-chip').length,
+      ])
+    );
+    // dropped 관문도 포함한다 — DD31 이 계획을 남기므로 그 날짜도 점유된다.
+    const allGatePlannedDates = Array.from(
+      new Set(calendar.getEvents().flatMap((event) => event.gates.map((gate) => gate.planned)))
+    ).sort();
+    const legacyRangeDates = Array.from(
+      new Set(
+        calendar.getEvents().flatMap((event) => {
+          const out = [];
+          for (let d = event.startDate; d <= event.endDate; d = frameWindow.shiftDateKey(d, 1)) out.push(d);
+          return out;
+        })
+      )
+    ).sort();
+    return { bucketKeys, bucketSizesByDate, chipCountsByDate, allGatePlannedDates, legacyRangeDates };
+  };
+
+  /** 어느 고정 입력에서나 참이어야 하는 점유 불변식 */
+  const assertOccupancyInvariants = (label, m, windowDates) => {
+    // 전제: 고정 입력의 관문이 전부 렌더 창 안인가. 메시지를 가르지 않으면 창
+    // 가장자리에서 난 실패가 DD31 미구현으로 읽힌다.
+    assert(
+      m.allGatePlannedDates.every((d) => windowDates.has(d)),
+      label + ': 고정 입력의 관문 날짜가 렌더 창 밖이다 — 구현 결함이 아니라 케이스 결함이다(오늘 날짜에 따라 갈린다)'
+    );
+    assert(setEq(m.bucketKeys, m.allGatePlannedDates), label + ': 점유가 관문 집합과 다르다');
+    assert(isSubset(m.bucketKeys, m.legacyRangeDates), label + ': 관문에 없던 날을 점유했다');
+    Object.keys(m.bucketSizesByDate).forEach((d) => {
+      // 인덱스가 맞다는 것과 화면이 맞다는 것은 다른 주장이다. rebuildIndex() 만 옳게
+      // 고치고 createChips() 가 옛 범위로 그리면 위 둘은 통과하고 여기서만 죽는다.
+      assert(
+        m.chipCountsByDate[d] === Math.min(m.bucketSizesByDate[d], CHIP_CAP),
+        label + ': 그리드 칩이 인덱스와 어긋난다 — ' + d + ' (칩 ' + m.chipCountsByDate[d] + ' / 버킷 ' + m.bucketSizesByDate[d] + ')'
+      );
+    });
+  };
+
+  // ── 1번 — 폭 있는 항목의 사이 날짜가 비는가 (이 케이스의 반증자) ──────────
+  {
+    const { frameWindow, calendar } = await freshCalendar();
+    const today = calendar.todayKey;
+    const shift = (n) => frameWindow.shiftDateKey(today, n);
+    const f1 = { gateA: shift(-3), gateB: today, gap: shift(-1) };
+    await calendar.addEvent({ startDate: f1.gateA, endDate: f1.gateB, title: 'M2b 1번 관문 둘' }); // DD31-FIXTURE 1 — today-3·today 관문
+    const windowDates = focusWindowOn(frameWindow, calendar, [f1.gateA, f1.gateB, f1.gap, today]);
+    await settle();
+    const m = measure(frameWindow, calendar);
+    assertOccupancyInvariants('점유 1번', m, windowDates);
+
+    // **개수가 아니라 날짜를 본다.** length === 2 만 보면 today-1·today 를 점유한
+    // 잘못된 구현도 통과한다.
+    assert(
+      setEq(m.bucketKeys, [f1.gateA, f1.gateB]),
+      '불연속 배치가 반영되지 않았다 — 4일 폭인데 점유가 관문 둘로 줄지 않았다'
+    );
+
+    // 그리드-패널 일치 (1) — 사이 날짜가 **양쪽 다** 비었는가
+    const gapConsistent = (m.chipCountsByDate[f1.gap] || 0) === 0 && calendar.getEventsForDate(f1.gap).length === 0;
+    assert(gapConsistent, '그리드와 패널이 today-1 에 다른 답을 낸다 — 둘 중 하나만 고쳤다(DD32)'); // DD32-CONSISTENCY-1
+
+    // Task 2 규칙 1 — 패널 메타가 관문 날짜 열거인가. (a) 두 날짜를 담고
+    // (b) 범위 구분자를 **안** 담는다. 옛 경로는 양 끝 날짜가 새 규칙과 똑같이
+    // 나오므로 (a) 만으로는 갈리지 않는다 — 가르는 것은 구분자다.
+    calendar.selectDate(f1.gateB);
+    await settle();
+    const meta1 = frameWindow.document.querySelector('.calendar-todo-meta').textContent;
+    const rule1Ok =
+      meta1.includes(frameWindow.formatShortDate(f1.gateA)) &&
+      meta1.includes(frameWindow.formatShortDate(f1.gateB)) &&
+      !meta1.includes(' – ');
+    assert(rule1Ok, '패널 메타가 관문 날짜 열거가 아니라 연속 범위다'); // TASK2-RULE-1
+
+    collector.add(
+      'occupancy/01-gap-is-empty',
+      {
+        bucketKeys: m.bucketKeys,
+        bucketSizesByDate: m.bucketSizesByDate,
+        gapChipCount: m.chipCountsByDate[f1.gap] || 0,
+        gapPanelCount: calendar.getEventsForDate(f1.gap).length,
+        panelMetaHasRangeDash: meta1.includes(' – '),
+      },
+      capturedErrors
+    );
+  }
+
+  // ── 2번 — 폭 없는 항목이 그대로인가 ────────────────────────────────────
+  {
+    const { frameWindow, calendar } = await freshCalendar();
+    const today = calendar.todayKey;
+    await calendar.addEvent({ startDate: today, endDate: today, title: 'M2b 2번 관문 하나' }); // DD31-FIXTURE 2 — today 관문 하나
+    const windowDates = focusWindowOn(frameWindow, calendar, [today]);
+    await settle();
+    const m = measure(frameWindow, calendar);
+    assertOccupancyInvariants('점유 2번', m, windowDates);
+    assert(setEq(m.bucketKeys, [today]), '폭 없는 항목의 점유가 today 하나가 아니다');
+
+    collector.add('occupancy/02-single-gate', {
+      bucketKeys: m.bucketKeys,
+      chipCount: m.chipCountsByDate[today],
+    });
+  }
+
+  // ── 3번 — 키 목록과 버킷 길이가 다른 것임을 드러낸다 ────────────────────
+  {
+    const { frameWindow, calendar } = await freshCalendar();
+    const today = calendar.todayKey;
+    await calendar.addEvent({ startDate: today, endDate: today, title: 'M2b 3번 이벤트 A' }); // DD31-FIXTURE 3 — 같은 날 서로 다른 이벤트 둘
+    await calendar.addEvent({ startDate: today, endDate: today, title: 'M2b 3번 이벤트 B' });
+    const windowDates = focusWindowOn(frameWindow, calendar, [today]);
+    await settle();
+    const m = measure(frameWindow, calendar);
+    assertOccupancyInvariants('점유 3번', m, windowDates);
+    assert(m.bucketKeys.length === 1, '같은 날 이벤트 둘이 날짜 키를 둘 만들었다');
+    assert(
+      m.bucketSizesByDate[today] === 2,
+      '서로 다른 이벤트 둘이 한 버킷에 둘로 서지 않았다 — 접기가 이벤트 경계를 넘었다'
+    );
+
+    collector.add('occupancy/03-two-events-one-date', {
+      bucketKeys: m.bucketKeys,
+      bucketSize: m.bucketSizesByDate[today],
+      chipCount: m.chipCountsByDate[today],
+    });
+  }
+
+  // ── 4번 — dropped 관문이 점유에 남는가 (계획은 남는다) ──────────────────
+  {
+    const { frameWindow, calendar } = await freshCalendar();
+    const today = calendar.todayKey;
+    const shift = (n) => frameWindow.shiftDateKey(today, n);
+    const f4 = { droppedKey: shift(-1), liveKey: shift(1) };
+    await calendar.addEvent({ startDate: f4.droppedKey, endDate: f4.liveKey, title: 'M2b 4번 범위축소' }); // DD31-FIXTURE 4 — today-1(dropped)·today+1
+    const f4Event = calendar.getEvents()[0];
+    const droppedGate = f4Event.gates.find((gate) => gate.planned === f4.droppedKey);
+    await calendar.updateGate(f4Event.id, droppedGate.id, { status: 'dropped' });
+    const windowDates = focusWindowOn(frameWindow, calendar, [f4.droppedKey, f4.liveKey, today]);
+    await settle();
+    const m = measure(frameWindow, calendar);
+    assertOccupancyInvariants('점유 4번', m, windowDates);
+    assert(
+      setEq(m.bucketKeys, [f4.droppedKey, f4.liveKey]),
+      'dropped 관문의 날짜가 점유에서 빠졌다 — 안 하기로 한 것과 애초에 없던 것은 다르다(DD31)'
+    );
+
+    collector.add('occupancy/04-dropped-keeps-cell', {
+      bucketKeys: m.bucketKeys,
+      droppedChipCount: m.chipCountsByDate[f4.droppedKey],
+      droppedGateStatus: calendar.getEvents()[0].gates.find((gate) => gate.planned === f4.droppedKey).status,
+    });
+  }
+
+  // ── 5번 — 같은 날 관문 둘이 한 이벤트를 두 번 점유하지 않는가 ───────────
+  {
+    const { frameWindow, calendar } = await freshCalendar();
+    const today = calendar.todayKey;
+    await calendar.addEvent({ startDate: today, endDate: today, title: 'M2b 5번 dev·review' }); // DD31-FIXTURE 5 — 같은 날 dev·review 관문, 이벤트 하나
+    const f5Event = calendar.getEvents()[0];
+    await calendar.addGate(f5Event.id, { kind: 'dev', planned: today, status: 'pending' });
+    await calendar.addGate(f5Event.id, { kind: 'review', planned: today, status: 'pending' });
+    // 익명 관문을 지워 DD25 가 허용하는 "같은 날 이름 있는 관문 둘" 만 남긴다.
+    const anonymous = calendar.getEvents()[0].gates.find((gate) => gate.kind === null);
+    await calendar.removeGate(f5Event.id, anonymous.id);
+    const windowDates = focusWindowOn(frameWindow, calendar, [today]);
+    await settle();
+    const m = measure(frameWindow, calendar);
+    assertOccupancyInvariants('점유 5번', m, windowDates);
+    assert(
+      calendar.getEvents()[0].gates.length === 2,
+      '5번 고정 입력이 같은 날 관문 둘을 갖지 못했다 — 케이스 결함이다'
+    );
+    assert(m.bucketSizesByDate[today] === 1, '같은 날 관문 둘이 한 이벤트를 두 번 점유했다');
+
+    // 그리드-패널 일치 (5) — 접힌 날이 **양쪽 다** 하나인가. 1번은 "둘 다 비었나"를,
+    // 이쪽은 "둘 다 하나인가"를 묻는다. 접기 누락은 1번을 통과하고 여기서만 죽는다.
+    const foldConsistent = m.chipCountsByDate[today] === 1 && calendar.getEventsForDate(today).length === 1;
+    assert(foldConsistent, '그리드와 패널이 today 에 다른 개수를 낸다 — 이벤트별 접기가 빠졌다(DD31·DD32)'); // DD32-CONSISTENCY-5
+
+    collector.add('occupancy/05-same-day-gates-folded', {
+      gateCount: calendar.getEvents()[0].gates.length,
+      bucketSize: m.bucketSizesByDate[today],
+      chipCount: m.chipCountsByDate[today],
+      panelCount: calendar.getEventsForDate(today).length,
+    });
+  }
+
+  // ── 6·7·8번 — Task 2 렌더 규칙 2·3 ─────────────────────────────────────
+  {
+    const { frameWindow, calendar } = await freshCalendar();
+    const today = calendar.todayKey;
+    const shift = (n) => frameWindow.shiftDateKey(today, n);
+
+    // f6 — 살아 있는 종단 관문이 지연(today-2)이고 그보다 늦은 관문이 dropped(today+2).
+    const f6 = { liveKey: shift(-2), droppedKey: shift(2) };
+    await calendar.addEvent({ startDate: f6.liveKey, endDate: f6.droppedKey, title: 'M2b 6번 지연+범위축소' });
+    const f6Event = calendar.getEvents()[0];
+    const f6Dropped = f6Event.gates.find((gate) => gate.planned === f6.droppedKey);
+    await calendar.updateGate(f6Event.id, f6Dropped.id, { status: 'dropped' });
+
+    // f7 — 프로젝트에 속한 이벤트. f8 — 무소속 이벤트. 날짜를 f6 과 겹치지 않게 둔다.
+    const f7 = { projectName: 'M2b 스모크 프로젝트', keyA: shift(1), keyB: shift(3) };
+    await calendar.addProject({ name: f7.projectName });
+    const projectId = calendar.projects[0].id;
+    await calendar.addEvent({ startDate: f7.keyA, endDate: f7.keyB, title: 'M2b 7번 프로젝트 소속', projectId });
+    const f8 = { keyA: shift(-3), keyB: shift(-1) };
+    await calendar.addEvent({ startDate: f8.keyA, endDate: f8.keyB, title: 'M2b 8번 무소속' });
+
+    const windowDates = focusWindowOn(frameWindow, calendar, [
+      f6.liveKey,
+      f6.droppedKey,
+      f7.keyA,
+      f7.keyB,
+      f8.keyA,
+      f8.keyB,
+      today,
+    ]);
+    await settle();
+    const m = measure(frameWindow, calendar);
+    assertOccupancyInvariants('렌더 규칙', m, windowDates);
+    assert(
+      calendar.getEventDueState(calendar.getEvents().find((event) => event.id === f6Event.id)) === 'overdue',
+      '6번 고정 입력의 살아 있는 종단 관문이 지연이 아니다 — 케이스 결함이다'
+    );
+
+    // 규칙 2 — dropped 날짜에 마감 상태가 안 붙는다: 칩 · 셀 · aria-label 셋 다.
+    // 칩이 **있으면서** is-due-* 가 없어야 한다 — 빈 셀은 이 단언을 거저 통과한다.
+    const droppedCell = frameWindow.document.querySelector('.calendar-day[data-date="' + f6.droppedKey + '"]');
+    const rule2Ok =
+      droppedCell.querySelectorAll('.calendar-chip').length > 0 &&
+      droppedCell.querySelectorAll('.calendar-chip[class*="is-due-"]').length === 0 &&
+      !Array.from(droppedCell.classList).some((token) => token.startsWith('is-due-')) &&
+      !(droppedCell.getAttribute('aria-label') || '').includes(OVERDUE_LABEL);
+    assert(rule2Ok, 'dropped 관문 날짜에 지연 상태가 붙었다 — 칩/셀/aria-label 중 하나가 남았다'); // TASK2-RULE-2
+
+    // 규칙 3 — 프로젝트 이름이 .calendar-todo-meta 의 **첫 조각**이고, 무소속에는 없다.
+    calendar.selectDate(f7.keyA);
+    await settle();
+    const meta3 = frameWindow.document.querySelector('.calendar-todo-meta').textContent;
+    calendar.selectDate(f8.keyA);
+    await settle();
+    const metaOrphan = frameWindow.document.querySelector('.calendar-todo-meta').textContent;
+    const rule3Ok = meta3.startsWith(f7.projectName) && !metaOrphan.includes(f7.projectName);
+    assert(rule3Ok, '프로젝트 이름이 메타의 첫 조각이 아니거나, 무소속 항목에 이름이 들어갔다'); // TASK2-RULE-3
+
+    collector.add(
+      'occupancy/06-render-rules',
+      {
+        droppedCellChipCount: droppedCell.querySelectorAll('.calendar-chip').length,
+        droppedCellDueChipCount: droppedCell.querySelectorAll('.calendar-chip[class*="is-due-"]').length,
+        droppedCellClasses: Array.from(droppedCell.classList).sort().join(' '),
+        droppedCellAriaHasOverdue: (droppedCell.getAttribute('aria-label') || '').includes(OVERDUE_LABEL),
+        projectMetaStartsWithName: meta3.startsWith(f7.projectName),
+        orphanMetaHasProjectName: metaOrphan.includes(f7.projectName),
+      },
+      capturedErrors
+    );
+  }
+
+  progress('calendar occupancy cases 완료');
+}
+
+/**
+ * 첫 실행 온보딩 (DD13 · UI8)
+ *
+ * 여섯을 돌린다. 3번·4번·6번은 **셋 다 다른 것을 잡는다** — 3번은 CalendarManager
+ * 쪽 실패, 4번은 SettingsManager 의 **읽기** 실패(loadSettings() 가 불렸으나 try 가
+ * 끊긴다), 6번은 SettingsManager 의 **초기화** 실패(loadSettings() 가 아예 안 불린다).
+ * @param {ReturnType<typeof createCollector>} collector
+ */
+async function runCalendarOnboardingCases(collector) {
+  const BRIGHTNESS_PROBE = 37;
+  const baseState = {
+    settingsVersion: 4,
+    widgetType: 'calendar',
+    mainWidgetEnabled: true,
+    searchEnabled: true,
+    calendarEvents: [],
+    calendarProjects: [],
+    // loadSettings() 의 **마지막** 관찰 가능한 부수효과다(둘째 try 의 밝기 반영).
+    // 이 값이 화면에 닿으면 그 메서드가 끝까지 돌았다는 뜻이고, 그다음에
+    // Application.initialize() 의 온보딩 판정이 선다. "안 뜬다" 를 단언하려면
+    // 판정이 이미 돌았다는 것을 알아야 하므로 이 신호가 필요하다.
+    overlayBrightness: BRIGHTNESS_PROBE,
+  };
+
+  /** 온보딩 판정이 이미 섰음을 확정한 뒤 표면 노드를 돌려준다 */
+  const settledOnboarding = async (frameWindow) => {
+    await waitFor(
+      () => frameWindow.document.getElementById('opacityValue').textContent === String(BRIGHTNESS_PROBE),
+      'SettingsManager.loadSettings() 완주 (온보딩 판정 직전 신호)'
+    );
+    await settle();
+    return frameWindow.document.getElementById('calendarOnboarding');
+  };
+
+  // ── 1번 — 프로젝트 0개 · 설정 읽기 정상 → 뜬다 ─────────────────────────
+  const frame1 = await loadApp(baseState); // DD13-CASE 1 — 프로젝트 0개 · 설정 정상
+  const onboarding1 = await settledOnboarding(frame1);
+  assert(
+    onboarding1.hidden === false,
+    '프로젝트가 없는 첫 로드에서 온보딩이 뜨지 않았다 — 정상 경로가 성립하지 않으면 아래 2번도 성립하지 않는다'
+  );
+
+  // ── 2번 — 건너뛰기를 누르고 다시 초기화 → 안 뜬다 ──────────────────────
+  frame1.document.getElementById('calendarOnboardingSkip').click(); // DD13-CASE 2 — 건너뛰기 뒤 재초기화
+  await waitFor(
+    () => frame1.document.getElementById('calendarOnboarding').hidden === true,
+    '건너뛰기가 온보딩 표면을 닫는다'
+  );
+  const skippedFlagStored =
+    (await chrome.storage.local.get(['calendarOnboardingSeen'])).calendarOnboardingSeen === true;
+  assert(
+    skippedFlagStored,
+    '건너뛰기가 한 번뿐인 플래그를 쓰지 않았다 — 다음 초기화에서 다시 뜬다(UI8 위반)'
+  );
+
+  const frame2 = await loadApp(Object.assign({}, baseState, { calendarOnboardingSeen: true }));
+  const onboarding2 = await settledOnboarding(frame2);
+  assert(
+    onboarding2.hidden === true,
+    '건너뛴 사용자에게 온보딩이 다시 떴다 — 넷째 항이 판정식에 없거나 읽히지 않는다'
+  );
+
+  // ── 3번 — 프로젝트 읽기 실패 → 안 뜨고 플래그도 안 탄다 ────────────────
+  const frame3 = await loadApp(Object.assign({}, baseState, { calendarProjects: { broken: 'not an array' } })); // DD13-CASE 3 — projectsLoadFailed
+  const onboarding3 = await settledOnboarding(frame3);
+  const app3 = frame3['__newTabApp'];
+  assert(
+    app3.calendarManager.projectsLoadFailed === true,
+    '3번 고정 입력이 projectsLoadFailed 를 세우지 못했다 — 케이스 결함이다'
+  );
+  assert(onboarding3.hidden === true, '프로젝트 읽기 실패를 첫 실행으로 오인해 온보딩이 떴다');
+  const flagAfter3 = (await chrome.storage.local.get(['calendarOnboardingSeen'])).calendarOnboardingSeen;
+  assert(flagAfter3 !== true, '프로젝트 읽기 실패 상태에서 한 번뿐인 플래그가 탔다 — 그 상태는 첫 실행이 아니다');
+
+  // ── 4번 — 설정 **읽기** 실패 → calendarSettingsLoaded 가 false ─────────
+  //
+  // 필드를 직접 false 로 대입해 세우지 않는다 — 그러면 "생성자 기본값이 있는가" 와
+  // "실패 경로가 그 줄에 안 닿는가" 둘 다 검사에서 빠져 이 케이스가 자기가 잡아야 할
+  // 것을 못 잡는다. 정상 부팅한 프레임에서 storage.get 을 던지게 만든 뒤 두 번째
+  // 인스턴스를 세워 loadSettings() 를 **실제로** 실패시킨다.
+  const frame4 = await loadApp(baseState); // DD13-CASE 4 — 설정 저장소 읽기 실패
+  await settledOnboarding(frame4);
+  const app4 = frame4['__newTabApp'];
+  const localApi4 = frame4.chrome.storage.local;
+  const originalGet4 = localApi4.get;
+  let probe4 = null;
+  try {
+    localApi4.get = function failingGet(keys) {
+      const list = Array.isArray(keys) ? keys : [keys];
+      // 설정 읽기만 끊는다. 달력·프로젝트 읽기는 그대로 둬야 4번이 3번과 다른 것을 잡는다.
+      if (list.indexOf('calendarOnboardingSeen') !== -1) {
+        return Promise.reject(new Error('smoke: 설정 저장소 읽기 실패 주입'));
+      }
+      return originalGet4.call(localApi4, keys);
+    };
+    probe4 = new (app4.settingsManager.constructor)(
+      app4.settingsManager.modal,
+      app4.settingsManager.toggleBtn,
+      app4.backgroundManager,
+      app4.calendarManager
+    );
+    await probe4.initialize();
+  } finally {
+    localApi4.get = originalGet4;
+  }
+  assert(
+    probe4.calendarSettingsLoaded === false,
+    '설정 읽기가 실패했는데 calendarSettingsLoaded 가 false 가 아니다 — true 대입이 try 밖(catch/finally)에 있거나 생성자 기본값이 없다'
+  );
+  assert(probe4.calendarOnboardingSeen === false, '설정 읽기 실패 경로에서 calendarOnboardingSeen 이 false 가 아니다');
+  const flagAfter4 = (await chrome.storage.local.get(['calendarOnboardingSeen'])).calendarOnboardingSeen;
+  assert(flagAfter4 !== true, '설정 읽기 실패 상태에서 한 번뿐인 플래그가 탔다 — 그 상태는 첫 실행이 아니다');
+
+  // ── 5번 — 온보딩이 떠 있는 동안 레이아웃이 안 움직인다 ──────────────────
+  const frame5 = await loadApp(baseState); // DD13-CASE 5 — 온보딩 표시 중 밴드 기하
+  const onboarding5 = await settledOnboarding(frame5);
+  const doc5 = frame5.document;
+  const widget5 = doc5.getElementById('calendarWidget');
+  const month5 = doc5.querySelector('.calendar-month');
+  assert(onboarding5.hidden === false, '5번 고정 입력에서 온보딩이 떠 있지 않다 — 케이스 결함이다');
+  const shown = {
+    widgetHeight: Math.round(widget5.getBoundingClientRect().height),
+    monthScroll: month5.scrollHeight - month5.clientHeight,
+  };
+  onboarding5.hidden = true;
+  await settle();
+  const closed = {
+    widgetHeight: Math.round(widget5.getBoundingClientRect().height),
+    monthScroll: month5.scrollHeight - month5.clientHeight,
+  };
+  assert(
+    shown.widgetHeight === closed.widgetHeight,
+    '온보딩 표시가 밴드 높이를 바꾸면 안 된다 (' + shown.widgetHeight + ' → ' + closed.widgetHeight + ')'
+  );
+  assert(
+    shown.monthScroll === closed.monthScroll,
+    '온보딩 표시가 월 그리드에 스크롤을 만들면 안 된다 (' + shown.monthScroll + ' → ' + closed.monthScroll + ')'
+  );
+
+  // ── 6번 — 설정 DOM 요소 부재로 인한 조기 return ────────────────────────
+  //
+  // loadApp() 만으로는 세울 수 없는 자리다 — 그 함수는 부팅 끝에 SettingsManager 가
+  // 조기 return 하지 *않았음*을 기다리고, 그 대기를 풀면 다른 모든 케이스의 전제가
+  // 함께 약해진다. 대신 부팅은 정상으로 하고 그 프레임 안에서 두 번째 인스턴스를 세운다.
+  const frame6 = await loadApp(baseState); // DD13-CASE 6 — 설정 DOM 부재로 조기 return
+  await settledOnboarding(frame6);
+  const app6 = frame6['__newTabApp'];
+  frame6.document.getElementById('blurToggle').remove(); // 열둘 중 하나만 없어도 조기 return 이 탄다
+  const probe6 = new (app6.settingsManager.constructor)(null, null, app6.backgroundManager, app6.calendarManager);
+  await probe6.initialize();
+  // **=== false 로 본다** — !probe6.calendarSettingsLoaded 로 보면 undefined 도 참이라
+  // 이 케이스가 잡아야 할 바로 그 상태를 통과시킨다.
+  assert(
+    probe6.calendarSettingsLoaded === false,
+    '조기 return 경로에서 calendarSettingsLoaded 가 false 가 아니다 — undefined 면 생성자 기본값이 없는 것이고, !undefined 가 참이라 온보딩이 매 로드마다 다시 뜬다'
+  );
+  assert(probe6.calendarOnboardingSeen === false, '조기 return 경로에서 calendarOnboardingSeen 이 false 가 아니다');
+  // 요소를 되돌리지 않는다 — 다음 loadApp() 이 iframe 을 새로 띄우므로 되돌리는 줄은
+  // 아무것도 지키지 않으면서 "요소가 없는 상태" 라는 이 케이스의 전제만 흐린다.
+  // 같은 이유로 이 프레임에 대고 다른 케이스를 잇지 않는다.
+
+  // ── 7번 — 이름을 넣고 만들기 → 프로젝트가 생기고 플래그가 탄다 ──────────
+  //
+  // 1~6번이 덮는 것은 **뜨는가 · 건너뛰면 다시 안 뜨는가** 뿐이라 만들기 경로
+  // 전체가 어느 케이스에도 없었다. 그 경로가 죽으면 사용자는 한 번뿐인 안내를
+  // 소모하고도 프로젝트를 얻지 못하며, 표면이 닫히므로 **그 사실조차 모른다.**
+  const frame7 = await loadApp(baseState); // DD13-CASE 7 — 만들기 성공
+  const onboarding7 = await settledOnboarding(frame7);
+  assert(onboarding7.hidden === false, '7번 고정 입력에서 온보딩이 떠 있지 않다 — 케이스 결함이다');
+  const CREATED_NAME = 'M2b 온보딩 프로젝트';
+  frame7.document.getElementById('calendarOnboardingName').value = CREATED_NAME;
+  // requestSubmit() 은 submit 이벤트를 **실제로** 발생시킨다(form.submit() 과 다르다).
+  // 버튼을 click() 하지 않는 이유는 Enter 제출 경로도 같은 핸들러를 타기 때문이다.
+  frame7.document.getElementById('calendarOnboardingForm').requestSubmit();
+  // waitFor 의 타임아웃을 **던지게 두지 않는다.** 표면이 안 닫히는 것은 이 케이스가
+  // 잡아야 할 결함이지 하네스 사고가 아니고, 던지면 뒤따르는 케이스 함수들이 통째로
+  // 안 돌아 결함 하나가 스위트 절반을 가린다. 단언으로 내려 기록하고 계속 간다.
+  let closed7 = false;
+  try {
+    await waitFor(
+      () => frame7.document.getElementById('calendarOnboarding').hidden === true,
+      '만들기 성공이 온보딩 표면을 닫는다'
+    );
+    closed7 = true;
+  } catch (_) {
+    closed7 = false;
+  }
+  assert(closed7, '만들기가 성공했는데 온보딩 표면이 닫히지 않았다');
+  const created7 = frame7['__newTabApp'].calendarManager.projects;
+  const createdOk = created7.length === 1 && created7[0].name === CREATED_NAME;
+  assert(createdOk, '만들기가 프로젝트를 만들지 못했다 — 표면만 닫히고 목록은 비어 있다');
+  const createdFlagStored =
+    (await chrome.storage.local.get(['calendarOnboardingSeen'])).calendarOnboardingSeen === true;
+  assert(createdFlagStored, '만들기 뒤 한 번뿐인 플래그가 타지 않았다 — 다음 초기화에서 안내가 다시 뜬다');
+
+  // ── 8번 — 저장 실패 → 말하고 · 안 닫고 · 플래그를 안 태운다 ─────────────
+  //
+  // 셋을 **함께** 약속하는 자리다. 하나만 무너져도 약속은 깨진다: 안 말하면 원칙 4 를
+  // 어기고, 닫으면 사용자가 만들었다고 믿고, 플래그가 타면 다시 볼 수 없는 안내를
+  // 실패로 소모한다. 그래서 셋을 각각 본다.
+  const frame8 = await loadApp(baseState); // DD13-CASE 8 — 만들기 실패
+  const onboarding8 = await settledOnboarding(frame8);
+  assert(onboarding8.hidden === false, '8번 고정 입력에서 온보딩이 떠 있지 않다 — 케이스 결함이다');
+  const localApi8 = frame8.chrome.storage.local;
+  const originalSet8 = localApi8.set;
+  let errorShown8 = false;
+  try {
+    // 4번과 같은 관용구다 — backend 'extension' 에서 storage 어댑터는
+    // chrome.storage.local **그 객체**를 그대로 돌려주므로, 메서드를 갈아끼우면
+    // 앱이 진짜 저장 실패를 겪는다. 필드를 손으로 세우는 것과 다르다.
+    localApi8.set = () => Promise.reject(new Error('smoke: 프로젝트 저장 실패 주입'));
+    frame8.document.getElementById('calendarOnboardingName').value = 'M2b 실패 프로젝트';
+    frame8.document.getElementById('calendarOnboardingForm').requestSubmit();
+    await waitFor(
+      () => frame8.document.getElementById('calendarOnboardingError').hidden === false,
+      '저장 실패가 온보딩 오류 문구를 띄운다'
+    );
+    errorShown8 = true;
+  } catch (_) {
+    // 7번과 같은 이유로 삼킨다 — 아래 단언이 이 사실을 기록한다.
+    errorShown8 = false;
+  } finally {
+    localApi8.set = originalSet8;
+  }
+  assert(errorShown8, '저장이 실패했는데 온보딩이 아무 말도 하지 않았다 (PRODUCT.md 원칙 4)');
+  const stillOpen8 = frame8.document.getElementById('calendarOnboarding').hidden === false;
+  assert(stillOpen8, '저장이 실패했는데 온보딩이 닫혔다 — 사용자는 만들었다고 믿는다');
+  const noProject8 = frame8['__newTabApp'].calendarManager.projects.length === 0;
+  assert(noProject8, '저장이 실패했는데 프로젝트가 목록에 남았다 — 저장소와 화면이 어긋난다');
+  const flagAfter8 = (await chrome.storage.local.get(['calendarOnboardingSeen'])).calendarOnboardingSeen;
+  assert(flagAfter8 !== true, '저장 실패에서 한 번뿐인 플래그가 탔다 — 다시 볼 수 없는 안내를 소모했다');
+
+  collector.add(
+    'onboarding/01-decision-matrix',
+    {
+      shownOnFirstRun: onboarding1.hidden === false,
+      skippedFlagStored,
+      hiddenAfterSkip: onboarding2.hidden === true,
+      hiddenOnProjectsLoadFailed: onboarding3.hidden === true,
+      flagUntouchedOnProjectsLoadFailed: flagAfter3 !== true,
+      settingsLoadedFalseOnReadFailure: probe4.calendarSettingsLoaded === false,
+      flagUntouchedOnSettingsReadFailure: flagAfter4 !== true,
+      settingsLoadedFalseOnEarlyReturn: probe6.calendarSettingsLoaded === false,
+      onboardingSeenFalseOnEarlyReturn: probe6.calendarOnboardingSeen === false,
+      surfaceClosedOnCreate: closed7,
+      projectCreatedOnSubmit: createdOk,
+      flagStoredOnCreate: createdFlagStored,
+      errorShownOnCreateFailure: errorShown8,
+      stillOpenOnCreateFailure: stillOpen8,
+      noProjectOnCreateFailure: noProject8,
+      flagUntouchedOnCreateFailure: flagAfter8 !== true,
+    },
+    capturedErrors
+  );
+  collector.add('onboarding/02-geometry-invariant', {
+    heightInvariant: shown.widgetHeight === closed.widgetHeight,
+    monthScrollInvariant: shown.monthScroll === closed.monthScroll,
+  });
+
+  progress('calendar onboarding cases 완료');
+}
+
 /* ────────────────────────── 실행 / 비교 ────────────────────────── */
 
 /**
@@ -1762,6 +2368,12 @@ async function runAll() {
     await runCalendarV4EquivalenceCases(collector);
     await runCalendarProjectCases(collector);
     await runCalendarGateCases(collector);
+    // 점유 전환(DD31·DD32)과 렌더 규칙 셋(Task 2). 관문 CRUD 가 검증된 다음에 온다 —
+    // 이 케이스들이 addGate/updateGate/removeGate 로 고정 입력을 세우기 때문이다.
+    await runCalendarOccupancyCases(collector);
+    // 온보딩은 점유 전환 뒤에 온다 (DD34) — 온보딩이 만드는 것은 프로젝트인데,
+    // 프로젝트를 읽는 화면이 아직 적응되지 않은 자리에서 만들면 만들자마자 안 보인다.
+    await runCalendarOnboardingCases(collector);
     await runRangeCases(collector);
     await runSummaryCases(collector);
     await runDateKeyCases(collector);

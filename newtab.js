@@ -544,6 +544,55 @@ function deriveEventRange(event) {
   return event;
 }
 
+/**
+ * 그 날짜에 **살아 있는**(`status !== 'dropped'`) 관문이 하나라도 있는가 (Task 2 규칙 2)
+ *
+ * DD31이 dropped 관문의 날짜도 점유에 남기므로, 살아 있는 종단 관문이 지연인
+ * 이벤트에서는 "안 하기로 한 날"의 셀에도 지연 상태가 붙는다. 사용자는 범위축소를
+ * 지연으로 읽고, PRD가 M2에 요구한 "조기·지연·범위축소가 **구분되어** 남는다"가
+ * 화면에서 다시 합쳐진다. 칩(`createChips()`)과 셀(`getCellDueState()`)이 **서로 다른
+ * 경로로** 마감 상태를 붙이므로 둘 다 이 함수를 탄다 — 한쪽만 고치면 칩에서 지운
+ * 지연색이 셀 배경과 `aria-label` 로 그대로 되돌아온다.
+ *
+ * `dropped` 를 **어떻게** 보이게 할지는 정하지 않는다 — 새 시각 언어는 M3의 몫이고(UI4),
+ * 이 마일스톤이 하는 것은 틀린 상태를 붙이지 않는 것까지다.
+ * @param {CalendarEvent} event
+ * @param {string} dateKey
+ * @returns {boolean}
+ */
+function hasLiveGateOn(event, dateKey) {
+  return (event && Array.isArray(event.gates) ? event.gates : []).some(
+    (gate) => gate && gate.planned === dateKey && gate.status !== 'dropped'
+  );
+}
+
+/**
+ * 패널 메타에 열거할 관문 날짜 (Task 2 규칙 1)
+ *
+ * 살아 있는 관문(`status !== 'dropped'`)의 `planned` 를 오름차순으로 중복 없이 돌려준다.
+ * **살아 있는 관문이 하나도 없으면(전부 `dropped`) `dropped` 관문의 날짜를 같은 규칙으로
+ * 돌려준다** — DD31이 그 날짜의 셀 점유를 남기므로, 패널이 날짜를 비우면 그리드는 차
+ * 있는데 패널은 비어 보여 DD32의 불변식이 그 입력에서만 깨진다. 마감이 없다는 사실은
+ * `getEventDueState()` 가 `''` 를 돌려주는 것으로 이미 표현되고, 메타는 **어디에 서
+ * 있는가**만 말한다.
+ * @param {CalendarEvent} event
+ * @returns {string[]}
+ */
+function gateMetaDates(event) {
+  const gates = event && Array.isArray(event.gates) ? event.gates : [];
+  const pick = (dropped) =>
+    Array.from(
+      new Set(
+        gates
+          .filter((gate) => gate && gate.planned && (gate.status === 'dropped') === dropped)
+          .map((gate) => gate.planned)
+      )
+    ).sort();
+
+  const alive = pick(false);
+  return alive.length > 0 ? alive : pick(true);
+}
+
 function createCalendarEvent(input, options) {
   if (!input || typeof input !== 'object' || Array.isArray(input)) return null;
 
@@ -1009,6 +1058,138 @@ function applyStorageNotice(state) {
 
   element.textContent = messages.join(' · ');
   element.hidden = false;
+}
+
+/**
+ * 첫 실행 온보딩을 연다 (DD13 · UI8)
+ *
+ * **판정은 하지 않는다** — 부를지 말지는 `Application.initialize()` 의 네 항 AND 식이
+ * 정하고, 이 함수는 열기만 한다. 판정을 여기로 내리면 그 식이 두 자리로 갈라진다.
+ *
+ * `applyStorageNotice()` 와 같은 형태다 — 상시 표면을 늘리지 않고 필요할 때만 나타난다.
+ *
+ * 사용자 문자열은 `textContent` 로만 렌더한다(`innerHTML` 금지). 프로젝트 이름이 닿는
+ * 곳은 이 함수의 입력값과 `.calendar-todo-meta` 의 한 줄 `textContent` 뿐이다.
+ *
+ * @param {CalendarManager} calendarManager
+ * @param {SettingsManager} settingsManager
+ */
+function openCalendarOnboarding(calendarManager, settingsManager) {
+  const element = document.getElementById('calendarOnboarding');
+  const form = document.getElementById('calendarOnboardingForm');
+  const input = document.getElementById('calendarOnboardingName');
+  const create = document.getElementById('calendarOnboardingCreate');
+  const skip = document.getElementById('calendarOnboardingSkip');
+  const error = document.getElementById('calendarOnboardingError');
+  if (!element || !(form instanceof HTMLFormElement) || !(input instanceof HTMLInputElement) || !skip) {
+    // 표면이 없으면 조용히 지나간다. **플래그는 태우지 않는다** — 본 적이 없는
+    // 안내를 봤다고 기록하면 그 사용자는 온보딩을 영영 못 본다.
+    console.error('Calendar onboarding elements not found');
+    return;
+  }
+
+  const showError = (message) => {
+    if (!error) return;
+    error.textContent = message;
+    error.hidden = false;
+  };
+
+  const close = () => {
+    element.hidden = true;
+  };
+
+  /**
+   * 저장이 도는 동안 재진입을 막는다
+   *
+   * `submitting` 이 실제 자물쇠이고 `disabled` 는 그 사실을 화면에 보이는 쪽이다 —
+   * 둘 다 있어야 한다. 가드가 없으면 Enter 를 두 번 빠르게 친 사용자의 두 번째
+   * 제출이 `persistEvents()` 의 `if (this.pending) return false` 에 걸려
+   * "저장하지 못했습니다" 를 띄운다. **첫 번째는 성공했는데도.**
+   *
+   * 입력칸은 잠그지 않는다 — Enter 로 제출하면 포커스가 아직 그 칸에 있고, 여기서
+   * disabled 를 걸면 포커스가 body 로 떨어졌다가 오류 경로의 `input.focus()` 로
+   * 되돌아오는 깜빡임이 생긴다. 잠글 것은 다시 **누를 수 있는** 두 버튼이다.
+   */
+  let submitting = false;
+  const setBusy = (busy) => {
+    if (create instanceof HTMLButtonElement) create.disabled = busy;
+    if (skip instanceof HTMLButtonElement) skip.disabled = busy;
+  };
+
+  form.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (submitting) return;
+    if (error) error.hidden = true; // 지난 시도의 문구를 남겨 두지 않는다
+    const name = input.value.trim();
+    if (!name) {
+      showError('프로젝트 이름을 적어 주세요.');
+      input.focus();
+      return;
+    }
+
+    submitting = true;
+    setBusy(true);
+    try {
+      // 만들기가 실패하면 **플래그를 태우지 않고 표면도 닫지 않는다.** 실패를 삼키면
+      // 사용자는 만들었다고 믿는데 목록은 비어 있고, 한 번뿐인 안내는 이미 소모된다.
+      // 문구는 무슨 일이 있었는지와 **그 결과**를 함께 말한다 — 저장 실패는 이 제품이
+      // 조용함을 포기하는 자리다.
+      const created = await calendarManager.addProject({ name });
+      if (!created) {
+        showError('프로젝트를 저장하지 못했습니다. 만들어지지 않았으니 다시 시도하거나 건너뛰세요.');
+        input.focus();
+        return;
+      }
+
+      if (error) error.hidden = true;
+      await settingsManager.saveCalendarOnboardingSeen();
+      close();
+    } finally {
+      // 성공 경로에서도 푼다. 이미 닫힌 표면의 버튼을 되돌리는 것은 무해하고,
+      // `finally` 로 두면 위 어느 await 이 던져도 자물쇠가 걸린 채 남지 않는다 —
+      // 그 상태의 카드는 눌러도 아무 일이 없으면서 닫히지도 않는다.
+      submitting = false;
+      setBusy(false);
+    }
+  });
+
+  /**
+   * 안내를 닫고 한 번뿐인 플래그를 태운다 (건너뛰기 · Escape 공용)
+   *
+   * **건너뛴 경우에도 플래그를 태운다** — 무소속이 정상 상태이므로(UI8) 반복 안내는
+   * 프로젝트 생성의 사실상 강제가 된다. 이 자리가 없으면 넷째 항이 영원히 false 라
+   * 건너뛴 사용자에게 매 초기화마다 다시 뜬다.
+   */
+  const dismiss = async () => {
+    if (submitting) return; // 저장 중에 닫으면 결과를 못 본 채 플래그만 탄다
+    await settingsManager.saveCalendarOnboardingSeen();
+    close();
+  };
+
+  skip.addEventListener('click', dismiss);
+
+  // Escape 를 건너뛰기와 **같은 경로**로 보낸다. 닫기만 하고 플래그를 안 태우면 다음
+  // 로드에 다시 뜨고, 사용자가 닫은 *방법*에 따라 다시 뜨는지가 갈린다 — UI8 이 막으려는
+  // 반복 안내가 키보드 사용자에게만 돌아온다.
+  //
+  // 리스너는 **카드에 건다(document 가 아니다).** document 에 걸면 온보딩이 떠 있는
+  // 동안 설정 모달에서 누른 Escape 까지 여기 닿아, 사용자가 의도하지 않은 자리에서
+  // 한 번뿐인 플래그가 탄다. 카드에 걸면 포커스가 카드 안에 있을 때 — 즉 사용자가 이
+  // 표면을 다루고 있을 때만 — 반응한다.
+  element.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape') return;
+    event.preventDefault();
+    dismiss();
+  });
+
+  element.hidden = false;
+  // **자동으로 포커스를 가져오지 않는다.** 새 탭의 1차 동선은 Ctrl+T 직후 주소창
+  // 타이핑이고, 여기서 `input.focus()` 를 부르면 그 첫 입력이 프로젝트 이름 칸으로
+  // 샌다 — 한 번뿐인 안내가 제품의 주 동선을 첫 실행에서 가로채는 셈이다. 카드는
+  // 보이고, 들어올지는 사용자가 클릭이나 Tab 으로 정한다.
+  //
+  // 위 오류 경로의 `input.focus()` 는 남긴다 — 그쪽은 사용자가 이미 제출한 **뒤**라
+  // 포커스가 카드 안에 있고, 무엇을 고쳐야 하는지를 가리키는 것이 맞다.
 }
 
 /**
@@ -3312,7 +3493,12 @@ class CalendarManager {
   }
 
   /**
-   * 렌더 창과 겹치는 이벤트만 날짜 버킷에 담는다 (DD7)
+   * 렌더 창과 겹치는 이벤트를 **관문 날짜** 버킷에 담는다 (DD31)
+   *
+   * 점유의 근거는 파생 `startDate..endDate` 범위가 아니라 `gates[].planned` 다.
+   * 전반부 DD4가 연속 범위를 파생값으로 강등한 것은 v3 롤백용 잔존 필드를 남기기
+   * 위해서이지 점유의 근거로 삼기 위해서가 아니다 — 잔존 필드로 셀을 채우면 저장은
+   * 관문으로 하면서 화면은 여전히 범위로 말하므로 사용자가 보는 것은 M1과 같다.
    *
    * 'YYYY-MM-DD'는 사전순 비교가 곧 시간순 비교라 문자열 그대로 겹침을 판정한다.
    * @param {string} windowStartKey - 그리드 첫 칸
@@ -3323,35 +3509,58 @@ class CalendarManager {
     if (!windowStartKey || !windowEndKey) return;
 
     this.events.forEach((event) => {
-      // 창 밖이면 전개 자체를 하지 않는다
+      // 창 밖이면 전개 자체를 하지 않는다. 파생 범위는 여기서 **겹침 판정에만** 쓴다 —
+      // 모든 관문의 planned 는 그 범위 안에 있으므로(deriveEventRange) 이 컷은
+      // 관문을 하나도 잃지 않으면서 5,000건 × 366일을 42칸 창으로 자르는 상한을 지킨다.
       if (event.endDate < windowStartKey || event.startDate > windowEndKey) return;
 
-      const from = event.startDate < windowStartKey ? windowStartKey : event.startDate;
-      const to = event.endDate > windowEndKey ? windowEndKey : event.endDate;
+      // 이벤트별로 planned 를 **집합으로 접는다.** 전반부 DD25가 같은 날 dev·review 를
+      // 허용하므로 관문 단위로 넣으면 한 이벤트가 같은 버킷에 두 번 들어가고, 그리드는
+      // 칩을 둘 그리는데 getEventsForDate() 는 .some(...) 이라 패널에 하나를 낸다 —
+      // DD32가 막으려는 바로 그 불일치가 다른 입구로 돌아온다. 접는 것은 **이벤트
+      // 안에서만**이다: 서로 다른 이벤트가 같은 날에 서는 것은 그대로 버킷 길이 둘이다.
+      //
+      // dropped 관문의 날짜도 넣는다 — **계획은 남는다.** 안 하기로 한 것과 애초에
+      // 없던 것은 다르고, 그 구분이 PRD가 M2에 요구한 "범위축소가 구분되어 남는다"의
+      // 화면 쪽 몫이다.
+      const plannedDates = new Set();
+      (event.gates || []).forEach((gate) => {
+        if (gate && gate.planned) plannedDates.add(gate.planned);
+      });
 
-      let cursor = from;
-      while (cursor <= to) {
-        const bucket = this.eventsByDate.get(cursor);
+      plannedDates.forEach((dateKey) => {
+        // 창 절단은 그대로 유지한다 — 관문으로 바꾸는 것은 *무엇을* 넣는가이지
+        // *얼마나* 넣는가가 아니다. 이 줄을 지우면 상한이 사라지고 성능 회귀가 난다.
+        if (dateKey < windowStartKey || dateKey > windowEndKey) return;
+
+        const bucket = this.eventsByDate.get(dateKey);
         if (bucket) {
           bucket.push(event);
         } else {
-          this.eventsByDate.set(cursor, [event]);
+          this.eventsByDate.set(dateKey, [event]);
         }
-        cursor = shiftDateKey(cursor, 1);
-      }
+      });
     });
   }
 
   /**
-   * 특정 날짜에 걸친 이벤트 (렌더 창과 무관)
+   * 특정 날짜에 **관문이 선** 이벤트 (렌더 창과 무관) — DD32
    *
-   * 패널은 월을 넘겨도 열려 있을 수 있어 선택 날짜가 렌더 창 밖일 수 있다.
-   * 창 인덱스로 조회하면 그 경우 빈 목록이 나오므로 전체를 훑는다.
+   * 점유를 읽는 자리는 둘이고 둘 다 관문으로 판정해야 한다. 그리드(`rebuildIndex()`)만
+   * 바꾸면 그리드는 화요일을 비워 두는데 화요일 칸을 누르면 패널에 그 이벤트가 나온다.
+   * 한 날짜에 대해 그리드와 패널이 다른 답을 내면 불연속 배치는 반쯤 구현된 것이고,
+   * 사용자가 보는 것은 버그다.
+   *
+   * **창 인덱스를 우회하는 구조는 그대로 둔다** — 패널은 월을 넘겨도 열려 있을 수 있어
+   * 선택 날짜가 렌더 창 밖일 수 있고, 창 인덱스로 조회하면 그 경우 빈 목록이 나온다.
+   * 바뀌는 것은 조회 규칙이지 우회 여부가 아니다.
    * @param {string} dateKey
    * @returns {CalendarEvent[]}
    */
   getEventsForDate(dateKey) {
-    return this.events.filter((event) => event.startDate <= dateKey && dateKey <= event.endDate);
+    return this.events.filter((event) =>
+      (event.gates || []).some((gate) => gate && gate.planned === dateKey)
+    );
   }
 
   /**
@@ -3938,14 +4147,24 @@ class CalendarManager {
   }
 
   /**
-   * 셀의 마감 상태 = 그 셀에 걸친 이벤트 중 가장 급한 것 (지연 > 오늘 > 내일)
+   * 셀의 마감 상태 = 그 셀에 **살아 있는 관문으로** 선 이벤트 중 가장 급한 것
+   * (지연 > 오늘 > 내일) — Task 2 규칙 2
+   *
+   * **날짜를 함께 받는다.** 서명이 `(dayEvents)` 하나였을 때 이 함수는 그 이벤트가
+   * 그 날에 **왜** 서 있는지(살아 있는 관문인지 `dropped` 인지)를 알 수 없었고,
+   * 그래서 칩에서 지운 지연색이 셀 배경(`is-due-*`)과 `aria-label` 로 그대로
+   * 되돌아왔다. 호출부(`createDayCell()`)가 그 셀의 `dateKey` 를 넘긴다.
    * @param {CalendarEvent[]} dayEvents
+   * @param {string} dateKey - 이 셀의 날짜
    * @returns {'' | 'overdue' | 'today' | 'soon'}
    */
-  getCellDueState(dayEvents) {
+  getCellDueState(dayEvents, dateKey) {
     /** @type {'' | 'overdue' | 'today' | 'soon'} */
     let state = '';
     for (let i = 0; i < dayEvents.length; i += 1) {
+      // 그 날짜의 관문이 **전부 dropped** 인 이벤트는 집계에서 건너뛴다.
+      // 살아 있는 관문이 하나라도 있으면 지금처럼 이벤트의 마감 상태를 집계한다.
+      if (!hasLiveGateOn(dayEvents[i], dateKey)) continue;
       const eventState = this.getEventDueState(dayEvents[i]);
       if (eventState === 'overdue') return 'overdue';
       if (eventState === 'today') state = 'today';
@@ -4063,7 +4282,9 @@ class CalendarManager {
     const dateKey = makeDateKey(cellDate);
     const dayEvents = this.eventsByDate.get(dateKey) || [];
     const pendingCount = dayEvents.filter((event) => !event.done).length;
-    const dueState = this.getCellDueState(dayEvents);
+    // 이 셀의 날짜를 함께 넘긴다 — 그 날짜의 관문이 전부 dropped 인 이벤트를
+    // 집계에서 빼려면 함수가 날짜를 알아야 한다 (Task 2 규칙 2).
+    const dueState = this.getCellDueState(dayEvents, dateKey);
 
     const cell = document.createElement('button');
     cell.type = 'button';
@@ -4132,7 +4353,10 @@ class CalendarManager {
       else if (isStart) shape = 'is-start';
       else if (isEnd) shape = 'is-end';
 
-      const dueState = this.getEventDueState(event);
+      // Task 2 규칙 2 — 마감 상태는 **셀마다** 정한다. 이 날짜의 관문이 전부
+      // dropped 이면 이 칩에 is-due-* 를 붙이지 않는다. 이벤트당 한 번 계산해
+      // 모든 칩에 같은 상태를 붙이면 "안 하기로 한 날"의 칩이 지연색을 쓴다.
+      const dueState = hasLiveGateOn(event, dateKey) ? this.getEventDueState(event) : '';
       chip.className = [
         'calendar-chip',
         shape,
@@ -4220,9 +4444,26 @@ class CalendarManager {
     body.appendChild(title);
 
     const meta = [];
-    if (event.startDate !== event.endDate) {
-      meta.push(`${formatShortDate(event.startDate)} – ${formatShortDate(event.endDate)}`);
+
+    // Task 2 규칙 3 — 프로젝트 이름이 메타의 **첫 조각**이다.
+    // `createTodoItem()` 에 프로젝트 뱃지 자리는 **없다**(제목·메타·메모·편집·삭제뿐).
+    // 없는 자리를 만들지 않고 기존 `.calendar-todo-meta` 스팬을 그대로 쓴다 —
+    // 새 요소도 새 클래스도 만들지 않는 것이 UI4다. `projectId` 가 null(무소속)이면
+    // 아무것도 넣지 않는다: 무소속이 정상 상태이고 그것을 따로 표시하지 않는 것이 UI8이다.
+    if (event.projectId) {
+      const project = this.projects.find((candidate) => candidate.id === event.projectId);
+      if (project) meta.push(project.name);
     }
+
+    // Task 2 규칙 1 — 메타는 파생 연속 범위가 아니라 **관문 날짜를 열거**한다.
+    // 옛 경로는 `formatShortDate(startDate) – formatShortDate(endDate)` 였고, 그대로
+    // 두면 월·수 관문 이벤트에서 그리드는 화요일을 비우는데 패널은 화요일을 포함한
+    // 범위로 말한다 — DD32가 막으려던 불일치가 패널 쪽에서 되살아난다.
+    // 관문이 하나면 날짜를 넣지 않는다(폭 없는 항목이 지금도 날짜 메타를 안 내는 것과
+    // 같은 규칙이다). 구분자는 `·` 이며, 이것이 옛 범위 표기(` – `)와 가르는 자리다.
+    const metaDates = gateMetaDates(event);
+    if (metaDates.length > 1) meta.push(metaDates.map(formatShortDate).join(' · '));
+
     if (event.priority !== 'normal') meta.push(PRIORITY_LABELS[event.priority]);
     if (meta.length > 0) {
       const metaLine = document.createElement('span');
@@ -4297,6 +4538,28 @@ class SettingsManager {
     this.widgetType = 'clock';
     this.widgetPosition = 'center-center';
     this.searchPosition = 'center-center';
+
+    /**
+     * 달력 설정을 **실제로 읽었는가** (DD13 첫째 항)
+     *
+     * 이 기본값이 `undefined` 를 없애는 유일한 줄이다. 아래 `loadSettings()` 의 대입은
+     * 성공 경로만 다루므로, 기본값이 없으면 실패 경로에서 필드가 `undefined` 로 남고
+     * `!undefined` 는 참이라 온보딩 판정의 항이 있으나 마나가 된다 — 항을 넣어 놓고
+     * 항상 참이 되는 것은 항을 안 넣은 것과 같다.
+     *
+     * 그 실패 경로는 둘이고 둘 다 조용하다:
+     * (1) `loadSettings()` 의 `storage.get()` 이 던진다 — `catch` 가 `console.error` 만
+     *     하고 재던지지 않으므로 그 아래 대입 전체가 건너뛰어진다
+     * (2) `initialize()` 가 설정 모달 요소 열둘 중 하나라도 없어 조기 `return` 한다 —
+     *     그 경로에서는 `loadSettings()` 가 **아예 호출되지 않는다**
+     *
+     * 둘 다 "설정을 못 읽었다"이고 그 상태는 첫 실행이 아니다. 그래서 온보딩을 띄우지
+     * 않고, 한 번뿐인 플래그도 태우지 않는다.
+     */
+    this.calendarSettingsLoaded = false;
+
+    /** 첫 실행 온보딩을 이미 봤는가 (DD13 넷째 항 · 설정 키 `calendarOnboardingSeen`) */
+    this.calendarOnboardingSeen = false;
 
     /** @type {{clock?: number, calendar?: number}} 위젯별 검색창 너비 캐시 */
     this.searchWidthByWidget = {};
@@ -4549,6 +4812,10 @@ class SettingsManager {
         'searchEnabled',
         'searchPosition',
         'searchWidthByWidget',
+        // 첫 실행 온보딩 플래그 (DD13). 다른 설정 키와 같은 경로로 읽는다 —
+        // 이 클래스에는 getSetting() 같은 범용 접근자가 없고, 설정은 이 한 번의
+        // storage.get() 이 읽어 인스턴스 필드에 담는 것이 관용구다.
+        'calendarOnboardingSeen',
         // 레거시 폴백 (읽기 전용 — 덮어쓰지 않는다)
         'clockEnabled',
         'clockPosition',
@@ -4563,6 +4830,15 @@ class SettingsManager {
         result.searchWidthByWidget && typeof result.searchWidthByWidget === 'object'
           ? result.searchWidthByWidget
           : {};
+
+      // `=== true` 를 쓴다 — 키가 없으면 `undefined === true` 가 거짓이므로 그것이
+      // 기본값 false 다. `!== false` 는 기본값 true 를 주는 관용구이고(widgetEnabled 가
+      // 그 예다), 기본값이 뒤집히면 첫 실행에 온보딩이 아예 안 뜬다.
+      this.calendarOnboardingSeen = result.calendarOnboardingSeen === true;
+      // **이 try 블록 안이어야 한다.** catch 나 finally 에 두면 읽기 실패에서도 true 가
+      // 되어 DD13 첫째 항이 도로 무력해진다. storage.get() 이 던지면 이 줄에 닿지 못하고
+      // 필드는 생성자 기본값 false 로 남는다 — 그것이 이 배선의 전부다.
+      this.calendarSettingsLoaded = true;
 
       if (this.widgetToggle instanceof HTMLInputElement) {
         this.widgetToggle.checked = widgetEnabled;
@@ -4819,6 +5095,29 @@ class SettingsManager {
       await storage.set({ mainWidgetEnabled: enabled });
     } catch (error) {
       console.error('Failed to save widget setting:', error);
+    }
+  }
+
+  /**
+   * 첫 실행 온보딩을 봤다는 사실 저장 (DD13)
+   *
+   * `saveWidgetSetting()` 과 같은 모양이다 — 키마다 작은 async 메서드가
+   * `storage.set({...})` 를 부르는 것이 이 클래스의 쓰기 관용구다.
+   *
+   * **필드도 함께 올린다.** 안 올리면 같은 세션에서 판정이 다시 서는 경로가 생겼을 때
+   * 옛 값을 읽는다. 그리고 **만들었을 때와 건너뛰었을 때 둘 다** 이것을 부른다 —
+   * 건너뛰기에서 안 부르면 넷째 항이 영원히 false 라 건너뛴 사용자에게 매 초기화마다
+   * 온보딩이 다시 뜨고, 무소속을 정상 상태로 두겠다는 UI8이 깨진다.
+   *
+   * **읽기 실패로 온보딩이 뜨지 않은 경우에는 부르지 않는다** — 그 상태는 첫 실행이
+   * 아니므로 한 번뿐인 플래그를 태울 자리가 아니다. 그 판정은 호출부가 진다.
+   */
+  async saveCalendarOnboardingSeen() {
+    this.calendarOnboardingSeen = true;
+    try {
+      await storage.set({ calendarOnboardingSeen: true });
+    } catch (error) {
+      console.error('Failed to save calendar onboarding flag:', error);
     }
   }
 
@@ -5504,6 +5803,33 @@ class Application {
       this.calendarManager
     );
     await this.settingsManager.initialize();
+
+    // DD13 — 첫 실행 온보딩. **자리 계약이다**: `await this.settingsManager.initialize()`
+    // **바로 다음 줄**에 잇고, 이것이 이 메서드의 새 마지막 문장이 된다. 초기화 순서를
+    // 바꾸거나 별도 메서드로 빼지 않는다 — SettingsManager 는 생성자에서
+    // this.calendarManager 를 받으므로 그것보다 먼저 만들 수 없고(순서 변경 불가),
+    // 별도 메서드로 빼도 그것을 부르는 자리는 결국 여기다(문제를 한 겹 옮길 뿐).
+    // 위 applyStorageNotice(...) 호출이 바로 이 형태 — 필요한 객체가 생긴 직후에
+    // 한 문장을 잇는 것이 이 메서드의 기존 관용구다.
+    //
+    // **네 항 전부에 소유자가 붙어 있다.** 이 자리의 this 는 Application 이고 그
+    // 클래스에는 projects 도 projectsLoadFailed 도 없다 — 둘 다 CalendarManager 의
+    // 필드이고, calendarSettingsLoaded·calendarOnboardingSeen 은 SettingsManager 의
+    // 필드다. bare 로 적으면 항이 undefined 를 읽고 `!undefined` 가 참이라 그 항은
+    // 있으나 마나가 된다.
+    //
+    // 첫째 항이 막는 것: 설정을 못 읽은 상태(읽기 실패 · DOM 부재로 인한 조기 return)를
+    // 첫 실행으로 오인하지 않는다. 셋째 항이 막는 것: 프로젝트 읽기 실패를 첫 실행으로
+    // 오인하지 않는다 — 그 상황에서 필요한 말은 "프로젝트를 만드시겠어요?" 가 아니라
+    // 전반부 DD27c 의 상시 고지가 이미 하고 있는 "목록을 못 읽었습니다" 다.
+    if (
+      this.settingsManager.calendarSettingsLoaded &&
+      this.calendarManager.projects.length === 0 &&
+      !this.calendarManager.projectsLoadFailed &&
+      !this.settingsManager.calendarOnboardingSeen
+    ) {
+      openCalendarOnboarding(this.calendarManager, this.settingsManager);
+    }
   }
 }
 
