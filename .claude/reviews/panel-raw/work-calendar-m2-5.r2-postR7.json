@@ -1,0 +1,110 @@
+{
+  "skipped": false,
+  "results": [
+    {
+      "perspective": "architect",
+      "verdict": "fail",
+      "findings": [
+        {
+          "claim": "Storage restore semantics are not specified - the plan describes complete state restoration but doesn't clarify whether restore should use clear-then-set (replacement) or merge-set with existing storage",
+          "evidence": "Plan line 9 (전체 상태...그 파일로 되돌린다), line 32 (UI2: 전체 상태 백업), line 483-487 (Task 4 restore procedure) describe complete state restore but never mention clear(). DD2 (line 67-71) justify deny-list by saying extras in backup are harmless, assuming complete replacement. But newtab.js:203-209 shows storage adapter's set() uses merge semantics (reads all, merges new keys). Plan never specifies which behavior is correct for restore. Test case 1 (line 523) checks 'all keys same as original' but doesn't clarify if this means ONLY original keys exist.",
+          "severity": "HIGH"
+        },
+        {
+          "claim": "Test case 1 specification is ambiguous about complete state validation - the assertion 모든 키가 원래 값과 같다 could mean either that original key values are preserved OR that no additional keys exist in storage",
+          "evidence": "Plan line 523 Task 6 case 1: '시드에서 봉투를 만들고 파싱한 뒤 복구하면 모든 키가 원래 값과 같다.' This could be satisfied by: (A) {a:1, b:2, c:3} where a,b are original but c was added after backup, or (B) only {a:1, b:2}. Plan never clarifies which is the intended test. If merge semantics are used and extra keys accumulate, interpretation (A) would pass incorrectly.",
+          "severity": "MEDIUM"
+        },
+        {
+          "claim": "Missing specification of SETTINGS_VERSION behavior when M3/M4 add new storage keys - plan doesn't specify whether version should bump when new keys are introduced in future milestones",
+          "evidence": "DD13 (line 177-189) describes version gate logic for restore comparing envelope version to SETTINGS_VERSION. Plan acknowledges (line 187-188) 'R3 invariant이...이 마일스톤 뒤에 M3·M4가 저장소 키를 더하므로 그때 만들어진 백업을 지금 코드로 되돌리는 상황이 실제로 생긴다' but doesn't specify if SETTINGS_VERSION should increment when new keys are added. This creates a boundary leak: new version (M3) backups might not be distinguishable from current version (M2.5) if no version bump is documented.",
+          "severity": "MEDIUM"
+        },
+        {
+          "claim": "Task sequence enforcement relies on manually-created pass file without cryptographic enforcement - Tasks 3-6 cannot proceed without Task 2's pass file, but the file can be forged and the plan acknowledges this",
+          "evidence": "Plan lines 444-448 explicitly state: 'R1·R3 invariant가...지목했다...여전히 위조 가능하며 그 이상을 주장하지 않는다 — 진짜 강제는 러너다'. All Task 3-6 validations (line 478, 503, etc) require 'grep -q \"^assert_failures=0$\" .claude/plans/work-calendar-m2-5.task2.pass'. At approval time, no CI runner exists to provide 'real enforcement'. The gate is procedurally weak and relies on developer honesty.",
+          "severity": "MEDIUM"
+        }
+      ],
+      "refutationAttempted": "Verified plan citations to newtab.js (SETTINGS_VERSION at line 18, PREVIEW_STORAGE_KEY at line 118, selectStorageBackend/createStorageAdapter at lines 132/166, sanitizeImportedEvents at line 1202, storage.set behavior at lines 203-209). Checked actual storage adapter implementation to verify it uses merge semantics. Traced deny-list logic (DD2) against actual storage set() behavior. Examined test case specifications for completeness. Confirmed 41 chrome.storage.local occurrences in test file match plan claim. Verified Task 2 pass file requirement propagates to Tasks 3-6. Found no specification of clear() before restore despite plan's \"complete state\" language. Identified ambiguity in test case 1 assertion and missing version bump guidance for M3/M4 storage changes."
+    },
+    {
+      "perspective": "security",
+      "verdict": "pass",
+      "findings": [],
+      "refutationAttempted": "Attacked the plan across its security-relevant design decisions:\n\n**Trust boundaries and encryption:** Verified backup envelope structure (DD1) uses distinct schema/backupVersion fields to avoid confusion with existing export format. Version gating (DD13) enforces one-way forward compatibility (rejects future versions, accepts and migrates lower versions). No new absolute paths or machine identifiers leak into durable artifacts.\n\n**Prototype pollution in parseBackupEnvelope (DD11):** Plan explicitly rejects __proto__, constructor, prototype as forbidden keys and requires \"평범한 객체\" (plain object) validation. The data object's top-level keys are checked. Task 6 case 9 (future key probe) validates the deny-list approach catches unknown keys. While the plan does not exhaustively detail validation of nested objects (e.g., within event/project arrays), sanitizeImportedEvents pattern it mirrors does whitelist parsing via createCalendarEvent(), and the test harness would surface any regression if nested objects weren't handled safely.\n\n**Atomicity and partial-state trust:** Backup and undo both use single `storage.set()` call (DD3, DD4), preventing half-written state. parseBackupEnvelope rejects entire batch on any validation failure (DD11) — no partial restore. Task 6 case 10 (spy on set() call count) verifies atomicity.\n\n**Slot recursion risk:** Undo slot key is explicitly in deny-list exclusion (DD2), preventing self-referential backup. Task 6 case 6 tests this.\n\n**Deny-list bypass:** DD2 uses deny-list (include all except excluded keys) rather than whitelist, correctly accounting for asymmetry (omitted keys = data loss, extra keys = harmless). Task 6 case 9 explicitly probes unknown keys with `__futureKeyProbe` and requires `futureKeyIncluded` assertion, preventing hidden whitelist implementation.\n\n**sourceLoadFailed flag:** Plan explicitly documents this as informational-only (DD9, DD5), not a security control. User can inspect the JSON file. Restore is atomic regardless of flag value.\n\n**Version confusion:** DD13 creates three paths: same version (restore as-is), lower (restore + migrate on reload), higher (reject). Follows existing `sanitizeImportedEvents` pattern of version 5+ rejection. No forward-looking data loss or schema confusion possible.\n\n**Timestamp and exported metadata:** `exportedAt` field is informational, no privilege associated. No path traversal in filenames — download uses browser's file picker, task 7-b uses `mv -n` with explicit filename.\n\n**Test coverage gap noted but mitigated:** Acceptance criteria does not explicitly test nested object validation for prototype pollution (e.g., poisoned __proto__ in an event object within the array). However: (1) the deny-list approach (Task 6 case 9) would catch unknown keys, (2) existing code paths validate calendarEvents via createCalendarEvent whitelist, (3) tests for atomic restore (case 10) and deny-list (case 9) are named/checked by plan. No concrete bypass path from hostile input to consequence identified.\n\nNo executable code, scripts, or links output; no secrets or paths leaked to artifacts. Plan follows precedent from existing sanitize patterns and explicitly calls out residual trust assumptions (judge = author, DA simulator vs. real Chrome extension).\n\n**Scenarios attempted and blocked:**\n- Backup file with nested __proto__ → reject (deny-list case 9 would catch; details not explicit but reference pattern mitigates)\n- Version confusion (future backup in old code) → reject (DD13 case 11)\n- Partial restore on array corruption → reject (all-or-nothing, case 7)\n- Slot recursion → prevented (excluded from deny-list, case 6)\n- Silent data loss from future keys → prevented (deny-list + case 9 future probe)\n"
+    },
+    {
+      "perspective": "test",
+      "verdict": "fail",
+      "findings": [
+        {
+          "claim": "Task 2 action creates task2.pass file automatically as part of code changes",
+          "evidence": "Plan lines 436-443 state task2.pass must be manually created by a person after running the harness. Task 2 Action describes no code change that would create this file - it requires a manual step: '\"비교 실행\" 단언 실패 0건을 확인한 뒤 `.claude/plans/work-calendar-m2-5.task2.pass` 에 아래 네 줄을 적고' (manually write four lines after confirming zero assertion failures). The file cannot be created by automated code review.",
+          "severity": "CRITICAL"
+        },
+        {
+          "claim": "Tasks 3-6 Validate lines are independent and can pass without Task 2 completing",
+          "evidence": "All Validate lines for Tasks 3-6 require checking content of `.claude/plans/work-calendar-m2-5.task2.pass` (e.g., Task 3 line 478: 'grep -q '^assert_failures=0$' .claude/plans/work-calendar-m2-5.task2.pass'). If this file doesn't exist or isn't created during Task 2, all four subsequent tasks fail immediately at Validate. The plan acknowledges (line 836): 'Task 2 통과가 Task 3 착수를 막지 못한다' and '손으로 만들면 통과한다' (can pass if manually created).",
+          "severity": "CRITICAL"
+        },
+        {
+          "claim": "Test cases 9-10 and 11-13 verify the core deny-list and atomicity guarantees",
+          "evidence": "Plan lines 567-574 explicitly state: '표식은 존재만 증명하고 단언의 값이 옳은지는 아니다' (markers only prove existence, not correctness). Task 6 Validate (line 576) checks for literal strings '__futureKeyProbe', 'futureKeyIncluded', 'setCallSpy' using grep, but these checks cannot verify the assertions pass or the behavior is correct. The plan itself admits the marker-based validation is incomplete: 'R2 invariant가 CRITICAL로 지목했고' (R2 marked as CRITICAL).",
+          "severity": "CRITICAL"
+        },
+        {
+          "claim": "Backup/restore functionality is testable via existing test framework",
+          "evidence": "No `runBackupRestoreCases` function exists in test/positioning.smoke.js (confirmed via grep). No tests for backup/restore are currently defined. The 13 test cases described in Task 6 Action (lines 522-562) exist only in the plan text, not in code. There is no existing test file that the plan can reference to verify these tests will actually work.",
+          "severity": "HIGH"
+        },
+        {
+          "claim": "The plan's test validation can prevent broken implementations from passing",
+          "evidence": "Plan line 952 from reviews acknowledges: '고쳐서 얻는 것은 Task 3 이 아니라 Task 2 에서 죽는 것이다' and lines 870, 887 state the task2.pass file can be forged and '여전히 위조 가능' (still possible to fake). Without a CI runner ('id=m2-headless-runner'), the Validate gates cannot distinguish between: (1) Task 2 was properly executed with zero assertion failures, (2) task2.pass was manually created with fake content. Plan explicitly marks this as 'CRITICAL' but '공개된 한계' (acknowledged limitation).",
+          "severity": "CRITICAL"
+        },
+        {
+          "claim": "Each test validates what it claims to validate",
+          "evidence": "Plan describes 13 specific test cases (Task 6, lines 522-562) but Validate line only checks for existence of marker strings, not correctness of test logic. For example, case 1 'round-trip' test is described as verifying 'all keys equal original' but the grep checks only verify '케이스' functions exist with marker names. A stub implementation with the right marker names would pass. Plan notes (line 950): '케이스 9 의 `__futureKeyProbe` 는 **시드 키 이름**이라, 키만 넣고 아무것도 단언하지 않는 구현도 통과한다'.",
+          "severity": "HIGH"
+        }
+      ],
+      "refutationAttempted": "Attempted to verify: (1) Whether task2.pass file creation is automated via code changes - found it requires manual human action per Task 2 Action lines 436-443, (2) Whether Tasks 3-6 Validate lines can pass independently - found all require task2.pass file created by Task 2, creating hard serial dependency, (3) Whether backup/restore test functions exist - found none exist yet (runBackupRestoreCases not in test file), (4) Whether test cases verify behavior vs just existence - found plan explicitly acknowledges markers only prove presence not correctness (line 573-574), (5) Whether gate prevents fakeable task2.pass from defeating validation - found plan acknowledges it can be manually created with fake content (line 870, 887, 836). Checked files: `.claude/plans/work-calendar-m2-5.plan.md` (entire plan), `.claude/reviews/plan-review-work-calendar-m2-5.md` (review findings), `test/positioning.smoke.js` (test implementation), `newtab.js` (source). Found no testable functions yet and structural dependency on manual file creation that Validate cannot enforce."
+    },
+    {
+      "perspective": "invariant",
+      "verdict": "fail",
+      "findings": [
+        {
+          "claim": "The plan acknowledges task2.pass file can be forged, creating a bypass for the Task 3-6 gate. The file requirement is listed as a skip predicate that gates Tasks 3-6, but implementers can create it manually with correct content (plan hash + origin + assert_failures=0), skipping Task 2 execution entirely without detection.",
+          "evidence": "Lines 870, 887: Plan document lists 'invariant CRITICAL: task2.pass 를 위조할 수 있다' as 'publicly known limitation' with no fix except headless runner (out of scope). Line 445: 'task2.pass' 존재만이 아니라 내용 검사로 올렸다' still admits forgeability. Line 436-437: Validates explicitly check content but don't verify Task 2 was actually executed.",
+          "severity": "CRITICAL"
+        },
+        {
+          "claim": ".gitattributes rule creation is specified in Task 0-a Action ('먼저 .gitattributes 에 `*.sha256 text eol=lf` 를 넣는다') but no executable command is provided for this critical step. Task 0-a text describes what to do but Task 0-b through 0-f contain code blocks while 0-a contains none for the .gitattributes modification.",
+          "evidence": "Lines 254-264: Task 0-a Action describes adding the rule and normalizing old anchors (code shown), but only shows bash for the 'tr' normalization. No 'echo' or 'append' command shown for .gitattributes. Line 322: '절차 규칙이고 기계적 강제가 없다' acknowledges lack of mechanical enforcement for most of Task 0.",
+          "severity": "HIGH"
+        },
+        {
+          "claim": "Task 0-a .gitattributes modification has no error handling. If the append fails silently, the rule won't exist, but no code validates success before proceeding. The Validate catches absence later (line 325), but the plan doesn't specify error handling during creation.",
+          "evidence": "Lines 254-264: No error checking shown (no 'grep -q' confirmation or '|| exit 1'). Line 322 states '절차 규칙이고 기계적 강제가 없다' indicating non-mechanical procedure. Line 325 Validate shows grep check but this is post-facto, not prevention.",
+          "severity": "HIGH"
+        },
+        {
+          "claim": "Plan version in task2.pass file can stale between Task 2 completion and Task 3-6 execution if plan is modified. While the Validate checks plan hash (line 450), there is no protection against a human modifying the plan after Task 2 passes and before Task 3 starts.",
+          "evidence": "Line 450: Task 2/3-6 Validate requires 'grep -q \"^plan=$(shasum -a 256 .claude/plans/work-calendar-m2-5.plan.md | cut -d\\' \\' -f1)$\"' but only at Validate time, not creation time. Plan sha256 in prompt is `76ac90038221ac09bf94594bd8ed297772cbe094d2006debb080c954a57d9950` - any modification to plan after task2.pass creation invalidates anchor.",
+          "severity": "MEDIUM"
+        },
+        {
+          "claim": "Task 2 Validate does not check whether task2.pass file was created. Plan only checks its content in Task 3-6 Validates. If task2.pass is missing, Tasks 3-6 will fail (correct), but Task 2 itself does not validate it produced the file.",
+          "evidence": "Line 450: Task 2 Validate ends with checks for code artifacts but does not include 'grep -q ... .claude/plans/work-calendar-m2-5.task2.pass'. Line 952 acknowledges this: 'Task 2 Validate 가 `task2.pass` 생성을 확인하지 않는다' and claims 'fail-closed' but this means silent failure at Task 3.",
+          "severity": "MEDIUM"
+        }
+      ],
+      "refutationAttempted": "Attacked five areas: (1) Skip predicate robustness - traced the task2.pass file usage through all dependent Tasks, confirmed it can be manually created without executing Task 2; (2) .gitattributes enforcement - examined Task 0-a Action for implementation procedure, found no executable command for the critical rule addition; (3) Error handling - searched for error checking around .gitattributes modification and task2.pass creation, found none at creation time; (4) Plan anchoring - checked whether plan hash in task2.pass is protected against post-creation plan changes; (5) Gate completeness - verified Task 2 Validate does not confirm its own output artifacts exist. All findings are documented in the plan's own review matrix (lines 836-956) as known issues, most categorized as non-blocking (비차단) but CRITICAL and HIGH severity."
+    }
+  ],
+  "coverage": 4,
+  "spent": 180886,
+  "reviewedPlanHash": "sha256:76ac90038221ac09bf94594bd8ed297772cbe094d2006debb080c954a57d9950"
+}

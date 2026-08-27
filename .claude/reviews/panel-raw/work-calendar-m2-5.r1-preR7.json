@@ -1,0 +1,89 @@
+{
+  "skipped": false,
+  "results": [
+    {
+      "perspective": "architect",
+      "verdict": "pass",
+      "findings": [],
+      "refutationAttempted": "Attacked plan structure for: (1) boundary leaks—verified adapter move won't disconnect STORAGE_BACKEND reference in applyStorageNotice() due to shared global lexical scope + load-order requirement; (2) single-source-of-truth—confirmed byte-identical inclusion in two HTML files with validation; (3) const vs function distinction—verified test access patterns (frameWindow.__newTabStorage for const, frameWindow['selectStorageBackend'] for function) match actual JS semantics; (4) citation accuracy—spot-checked DD1 sanitizeImportedEvents line 1220 (version===4 whitelist correct), SETTINGS_VERSION line 18, chrome.storage.local count 41; (5) coupling—confirmed no call sites outside newtab.js and test file; (6) atomicity—single set() per restore/undo with payload union prevents half-state; (7) order dependency—Task 1 runtime witness (document.body.dataset.storageBackend) validates binding, Task 0-f hash + Task 1 first-line/last-line checks prevent staleness; (8) validation sufficiency—checked Acceptance criteria are mechanically verifiable or explicitly marked [사람]; (9) internal contradictions—none found between DD1-DD13 and Tasks; (10) environmental assumptions—const binding in classic scripts correctly understood with explicit runtime verification required."
+    },
+    {
+      "perspective": "security",
+      "verdict": "pass",
+      "findings": [],
+      "refutationAttempted": "Attacked trust boundaries for backup/restore data path. Examined: (1) deny-list approach for backup (uses exclude-by-default which DD2 justifies — new keys auto-included, prevents silent data loss vs whitelist risk). (2) Input validation — DD11 requires whitelist parsing of untrusted JSON with forbidden key checks (`__proto__`, `constructor`, `prototype`) and size limits (plan specifies requirement even if size metric unspecified; Task 6 case 7 tests parse-error atomicity). (3) Storage atomicity — one `storage.set()` call prevents partial-state corruption (plan references existing pattern at newtab.js:3612). (4) Version compatibility (DD13) — rejects future `settingsVersion`, accepts past versions with migration chain on reload; implemented as guard before any storage.get(). (5) Undo slot eviction risk (DD5) — acknowledged as acceptable because file backup is the real safety, not storage slot. (6) Sensitive data in backups — no encryption per PRD (Out of scope), backup file user-controlled (acceptable). (7) File handling — predictable filename format but browser download API controls path; import via file input API (safe). (8) Prototype pollution — defended by forbidden keys check. (9) Serialization — JSON.stringify/parse safely handle special characters. (10) Incomplete validation gap — plan requires size limit (DD11) but Task 6 test cases don't explicitly test it; however `storage.set()` fails atomically if quota exceeded, so consequence is restore-fails not data-loss. (11) Existing code references validated (SETTINGS_VERSION at newtab.js:18, sanitizeImportedEvents at line 1202 as pattern for whitelist parsing, canExport at line 3822). Six review rounds (R1-R6) with 15 CRITICAL/HIGH findings all addressed; no security-specific vulnerabilities remained. Plan philosophy (DD6) is move-not-rewrite to preserve existing trusted storage adapter semantics."
+    },
+    {
+      "perspective": "test",
+      "verdict": "fail",
+      "findings": [
+        {
+          "claim": "Task 2 replaces the hardcoded assertion 'actual === extension' with logic that derives expected values from the origin",
+          "evidence": "Plan line 417-420 describes replacing the assertion by 'deriving the expected value from the origin' but provides no actual code specification. Validate line 444 only checks that the string is removed (!grep), not that a valid replacement exists. The plan narrative says 'select({ chromeRef: typeof chrome !== \"undefined\" ? chrome : undefined, localStorageRef: localStorage })' but this is descriptive text, not testable code assertion.",
+          "severity": "HIGH"
+        },
+        {
+          "claim": "Task 2 defines and tests runAdapterIdentityCases to verify adapter identity between iframe and harness windows",
+          "evidence": "Plan line 398-411 describes the test case but provides no code template. Validate line 444 only checks for grep count >= 2 (definition + call), not the actual test assertions. Specifically, the plan says the case should verify 'frameWindow.document.body.dataset.storageBackend가 비어 있지 않아야 한다' (line 409) but Validate doesn't check for this assertion.",
+          "severity": "MEDIUM"
+        },
+        {
+          "claim": "Task 6 Action lists exactly 8 test cases for backup/restore functionality",
+          "evidence": "Plan line 516 states '케이스 여덟' (eight cases) but then lists 13 numbered cases (1-13). This internal contradiction was noted in review absorption (R4 test HIGH at line 874-877) but the plan text was never updated to reflect the actual count of 13.",
+          "severity": "MEDIUM"
+        },
+        {
+          "claim": "Task 6 case 9 validates that the deny-list approach does not secretly become a whitelist",
+          "evidence": "Plan line 530-533 describes case 9 as testing that unknown keys ('__futureKeyProbe') are included in the backup envelope to prove deny-list doesn't miss future keys. However, Validate line 566 only checks for the presence of the string '__futureKeyProbe' in the code, not whether the actual test asserts that this key is present in the backup envelope. A test that creates the probe key but never validates it's in the envelope would pass Validate.",
+          "severity": "HIGH"
+        },
+        {
+          "claim": "Tasks 3-6 Validate gates are dependent on task2.pass file content verification",
+          "evidence": "Plan line 472, 497, 566 all require 'grep -q '^assert_failures=0$' .claude/plans/work-calendar-m2-5.task2.pass'. But Task 2's Validate (line 444) does not verify that this file is created or has correct content. Task 2 Action (line 430-437) is narrative describing what the human should write to this file, but the Validate doesn't verify it was actually written. A human could skip this step and Tasks 3-6 would fail, but there's no test that proves the file format.",
+          "severity": "MEDIUM"
+        },
+        {
+          "claim": "The baselineOrigin metadata is added to baseline snapshots for origin-aware comparison",
+          "evidence": "Plan line 427-428 describes adding origin metadata and rejecting mismatches (DD8). Validate line 444 checks that 'baselineOrigin' string exists in the code, but there is no specification of WHERE in the harness code this metadata gets recorded or HOW it's compared. The plan narrative in Task 2 Action describes what should happen but doesn't specify the actual code location or data structure.",
+          "severity": "MEDIUM"
+        },
+        {
+          "claim": "Task 6 case 13 tests that broken calendar state can export via the UI button path",
+          "evidence": "Plan line 548-553 describes case 13 testing 'DD9의 주장이 경로에 대한 것이므로 경로로 시험해야 한다' (testing via the actual UI path, not just the pure function). Validate line 566 requires grep for 'brokenExportViaUi' but the plan doesn't specify this as a fixed marker name or explain where this string should appear in the code.",
+          "severity": "LOW"
+        }
+      ],
+      "refutationAttempted": "Examined the plan's task structure and Validate commands against actual test requirements. Checked that:\n1) Task 2 replacement assertion logic - plan describes intent but Validate only checks for removal, not presence of correct replacement\n2) runAdapterIdentityCases function - plan describes what to test but provides no code specification; Validate only checks existence/calls, not test content\n3) Task 6 case list - plan header says \"여덟\" but lists 13 cases; internal inconsistency\n4) Deny-list test (case 9) - Validate only checks for string presence, not whether backup envelope actually contains the probed key\n5) task2.pass gatekeeping - Tasks 3-6 depend on this file but Task 2 Validate doesn't verify it's created\n6) baselineOrigin metadata - described narratively but not testably specified where it goes or how it's validated\n7) brokenExportViaUi marker - required by Validate but not explained as a fixed marker in Action section"
+    },
+    {
+      "perspective": "invariant",
+      "verdict": "pass",
+      "findings": [
+        {
+          "claim": "Sequential task gating via task2.pass marker is vulnerable to forgery, creating unanchored skip predicates",
+          "evidence": "Plan lines 429-442, 826, 860, 877. The marker anchors Task 3-6 execution to Task 2 completion via content check (plan hash, assert_failures=0, origin). Review history (R5, line 895) confirms plan hash check was added to prevent stale markers. However, marker file is acknowledged as forgeable without a CI runner (line 441: '여전히 위조 가능하며 그 이상을 주장하지 않는다' — still forgeable, we make no further claims). Mitigation exists via secondary static checks (Task 3-6 Validate at line 472 requires function existence: grep -q 'function buildBackupEnvelope' newtab.js), which would fail if Task 1 was actually skipped. Gate is HALT but with public limitation.",
+          "severity": "MEDIUM"
+        },
+        {
+          "claim": "Approval-time premise verification for harness death on http origin lacks runtime evidence",
+          "evidence": "Plan lines 653-682 (Validation 1-e). The premise '하네스가 http 오리진에서 죽는다' (harness dies on http origin) is checked with code evidence only: grep -q '__newTabStorage' test/positioning.smoke.js (to verify adapter not yet moved) and grep -q 'typeof chrome !== ...' newtab.js (to verify check exists). Runtime evidence is deferred to Task 0-d per line 681: '1-e 는 코드 증거다. 실행 증거는 Task 0-d 만이 만든다' (1-e is code evidence only; Task 0-d is sole source of runtime evidence). Task 0-d is listed as procedural rule without machine enforcement (line 276). If Task 0-d is not executed, the premise remains unverified at implementation time.",
+          "severity": "MEDIUM"
+        },
+        {
+          "claim": "Fallback documentation pattern for unrunnable automated gates allows approval without execution",
+          "evidence": "Plan lines 744-754 and Acceptance line 797. Validation 4 (browser execution) is marked [사람] (human gate). Plan states: '돌지 않았다면 돌지 않았다고 적는다' (if not run, document that). Acceptance criterion says: '돌지 않았으면 그렇게 적는다' (if not run, note that). This is an intentional fallback pattern acknowledging repository lacks CI/runners. Gate can degrade from HALT to DOCUMENTED-ABSENCE without failing approval. However, this is disclosed design, not erosion.",
+          "severity": "LOW"
+        },
+        {
+          "claim": "Anchoring via .gitattributes rule check permits coexistence of conflicting rules",
+          "evidence": "Plan Validation 1-g lines 677-678: `grep -q 'sha256 text eol=lf' .gitattributes && echo 'NOTE:...'`. Check only verifies existence of the correct rule, not absence of conflicting rules (e.g., `*.sha256 text eol=crlf` in same file). While gitattributes matching is order-dependent (first pattern wins), validation doesn't enforce that the correct rule appears first or alone. Current .gitattributes (read at task start) only has `*.verify.sh text eol=lf` line 1, so no pre-existing conflict. But validation allows logical state where multiple conflicting rules coexist with grep passing.",
+          "severity": "LOW"
+        }
+      ],
+      "refutationAttempted": "Attacked fail-closed gate machinery: traced task2.pass skip predicates (confirmed HALT via grep -q chains and secondary function existence checks). Verified approval-time validation structure (Validation 1 checks premises with available evidence; runtime checks deferred to Task 0-d per disclosed plan). Examined .gitattributes rule enforcement (existence check correct but doesn't prevent conflicting coexisting rules). Verified anchor anchoring via plan hash in task2.pass (shasum on-the-fly at line 472 prevents stale markers, confirmed by R5 review absorption). Checked rollback paths (restoration followed by page reload restores memory-storage sync; undo slot stored atomically with restored data, preventing partial states). Verified accounting: all tasks require explicit prerequisite markers or file existence (task2.pass, moved-range.txt, storage-adapter.js non-existence). Traced one full failure path: if Task 2 is skipped but task2.pass is forged, Task 3 Validate still blocks on grep for backup function existence (line 472), providing defense in depth. Reviewed denial-list vs whitelist for backup (Task 6 case 9 tests unknown-key inclusion, preventing silent whitelist hiding). No unanchored skip predicates found—all downstream gates require concrete file/hash/function evidence, not inferred state."
+    }
+  ],
+  "coverage": 4,
+  "spent": 108390,
+  "reviewedPlanHash": "sha256:c4de1ddb13cb56973d10995e2b47a3cbd954a309f0df2c4207a9a5409d22d3ba"
+}
